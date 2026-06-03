@@ -187,15 +187,21 @@ class Editor {
     const isSel = target === this.selected;
     const col = this.p.palette[target];
     roundRect(ctx, sx + pad, sy + pad, r, r, Math.min(5, cell * 0.18));
-    ctx.fillStyle = isSel ? '#ffffff' : '#2a2740';
-    ctx.fill();
     if (isSel) {
+      // Highlight: a bright cell waiting for the currently selected color.
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
       ctx.lineWidth = Math.max(1, cell * 0.07);
       ctx.strokeStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
       ctx.stroke();
+    } else {
+      // Muted: a dimmed tint of the cell's real color so the picture still
+      // reads and you keep your bearings, instead of a black-and-white look.
+      ctx.fillStyle = mutedColor(col);
+      ctx.fill();
     }
     if (showNum) {
-      ctx.fillStyle = isSel ? `rgb(${col[0]},${col[1]},${col[2]})` : '#8a86a8';
+      ctx.fillStyle = isSel ? `rgb(${col[0]},${col[1]},${col[2]})` : numberInk(col);
       ctx.fillText(String(target + 1), sx + cell / 2, sy + cell / 2 + cell * 0.03);
     }
   }
@@ -412,6 +418,24 @@ class Editor {
 }
 
 /* ---------- helpers ---------- */
+
+const MUTE_BASE = [22, 20, 39]; // board background (#161427)
+
+// A dimmed tint of a palette color: keeps the hue (so the picture still reads)
+// but blends toward the dark background so highlighted cells clearly stand out.
+function mutedColor(col) {
+  const t = 0.62;
+  const r = Math.round(col[0] * (1 - t) + MUTE_BASE[0] * t);
+  const g = Math.round(col[1] * (1 - t) + MUTE_BASE[1] * t);
+  const b = Math.round(col[2] * (1 - t) + MUTE_BASE[2] * t);
+  return `rgb(${r},${g},${b})`;
+}
+
+// A faint, legible number on a muted cell (light ink on dark tints, dark on light).
+function numberInk(col) {
+  const mutedLum = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) * 0.38 + 9;
+  return mutedLum > 120 ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.4)';
+}
 
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
