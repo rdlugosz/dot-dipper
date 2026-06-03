@@ -9,13 +9,16 @@ const CELL = 20;        // world units per cell
 const MIN_LABEL = 15;   // show numbers only when cells are at least this big (px)
 const GEM_VARIANTS = 3; // subtly varied shades per color, for an ombre look
 const SHAPES = ['circle', 'diamond', 'square'];
-const SHAPE_GLYPH = { circle: '●', diamond: '◆', square: '■' };
+const PULSE_PERIOD = 1300;   // ms per pulse cycle
+const PULSE_MAX = 0.5;       // how far eligible cells tint toward their color
 
 function loadShape() {
   const s = localStorage.getItem('dotdipper.shape');
   return SHAPES.includes(s) ? s : 'circle';
 }
 function saveShape(s) { localStorage.setItem('dotdipper.shape', s); }
+function loadPulse() { return localStorage.getItem('dotdipper.pulse') === '1'; }
+function savePulse(b) { localStorage.setItem('dotdipper.pulse', b ? '1' : '0'); }
 
 const clamp8 = v => Math.max(0, Math.min(255, Math.round(v)));
 
@@ -63,6 +66,9 @@ class Editor {
     this.tool = 'dot';            // 'dot' | 'hand' | 'erase'
     this.brush = 1;               // brush width in cells (1, 2, or 3 → 1/4/9 dots)
     this.shape = loadShape();     // gem shape: 'circle' | 'diamond' | 'square'
+    this.pulse = loadPulse();     // gently pulse eligible cells (accessibility aid)
+    this.pulseAmt = 0;
+    this._pulseRaf = 0;
     this.history = [];
     this.pointers = new Map();
     this.pinch = null;
@@ -85,6 +91,7 @@ class Editor {
     this.updateProgress();
     this.draw();
     this.observeResize();
+    if (this.pulse) this.startPulse();
   }
 
   // Pre-render each palette color as a set of glossy gem sprites (a few subtly
@@ -128,16 +135,75 @@ class Editor {
     });
   }
 
-  cycleShape() {
-    this.shape = SHAPES[(SHAPES.indexOf(this.shape) + 1) % SHAPES.length];
-    saveShape(this.shape);
+  setShape(s) {
+    if (!SHAPES.includes(s) || s === this.shape) return;
+    this.shape = s;
+    saveShape(s);
     this.buildGemSprites();
-    this.updateShapeBtn();
     this.scheduleDraw();
   }
 
-  updateShapeBtn() {
-    document.getElementById('shapeBtn').textContent = SHAPE_GLYPH[this.shape];
+  setPulse(on) {
+    this.pulse = on;
+    savePulse(on);
+    if (on) this.startPulse(); else this.stopPulse();
+  }
+
+  // Continuous (throttled) repaint loop that drives the eligible-cell pulse.
+  startPulse() {
+    if (this._pulseRaf) return;
+    let last = 0;
+    const tick = ts => {
+      this._pulseRaf = requestAnimationFrame(tick);
+      if (ts - last < 33) return;             // ~30fps is plenty for a gentle pulse
+      last = ts;
+      if (this.pulse && document.visibilityState === 'visible') this.draw();
+    };
+    this._pulseRaf = requestAnimationFrame(tick);
+  }
+
+  stopPulse() {
+    cancelAnimationFrame(this._pulseRaf);
+    this._pulseRaf = 0;
+    this.pulseAmt = 0;
+    this.draw();   // settle to the plain (un-pulsed) highlight
+  }
+
+  // Options sheet: display preferences (dot shape + pulse mode).
+  openSettings() {
+    const ov = document.createElement('div');
+    ov.className = 'modal';
+    ov.innerHTML = `
+      <div class="modal-card">
+        <h2>Options</h2>
+        <div class="field">
+          <label>Dot shape</label>
+          <div class="seg" id="shapeSeg">
+            <button data-s="circle">● Circle</button>
+            <button data-s="diamond">◆ Diamond</button>
+            <button data-s="square">■ Square</button>
+          </div>
+        </div>
+        <label class="toggle-row">
+          <span>Pulse squares you can place<br><small>Gentle glow to help spot them</small></span>
+          <input type="checkbox" id="pulseToggle">
+        </label>
+        <button class="btn-primary" id="optDone">Done</button>
+      </div>`;
+    const close = () => ov.remove();
+    ov.addEventListener('click', e => { if (e.target === ov) close(); });
+    const seg = ov.querySelector('#shapeSeg');
+    const refreshSeg = () =>
+      seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.s === this.shape));
+    seg.querySelectorAll('button').forEach(b => {
+      b.onclick = () => { this.setShape(b.dataset.s); refreshSeg(); };
+    });
+    refreshSeg();
+    const toggle = ov.querySelector('#pulseToggle');
+    toggle.checked = this.pulse;
+    toggle.onchange = () => this.setPulse(toggle.checked);
+    ov.querySelector('#optDone').onclick = close;
+    document.body.appendChild(ov);
   }
 
   // Coalesce repaint requests into one render per animation frame.
@@ -158,10 +224,9 @@ class Editor {
     on('handBtn', () => this.setTool(this.tool === 'hand' ? 'dot' : 'hand'));
     on('eraseBtn', () => this.setTool(this.tool === 'erase' ? 'dot' : 'erase'));
     on('brushBtn', () => { this.brush = this.brush % 3 + 1; this.updateBrushBtn(); });
-    on('shapeBtn', () => this.cycleShape());
+    on('settingsBtn', () => this.openSettings());
     on('refBtn', () => this.toggleReference());
     this.updateBrushBtn();
-    this.updateShapeBtn();
     document.getElementById('reference')
       .addEventListener('click', () => document.getElementById('reference').classList.add('hidden'), sig);
     document.getElementById('celebrateClose')
@@ -253,6 +318,10 @@ class Editor {
 
   draw() {
     const ctx = this.ctx;
+    // Pulse amount for eligible cells: 0 when off, otherwise a gentle 0..PULSE_MAX sine.
+    this.pulseAmt = (this.pulse && !this.interacting)
+      ? (1 - Math.cos((performance.now() % PULSE_PERIOD) / PULSE_PERIOD * 2 * Math.PI)) / 2 * PULSE_MAX
+      : 0;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.fillStyle = '#161427';
     ctx.fillRect(0, 0, this.cssW, this.cssH);
@@ -326,8 +395,11 @@ class Editor {
     roundRect(ctx, sx + pad, sy + pad, r, r, Math.min(5, cell * 0.18));
     if (isSel) {
       // Highlight: a bright cell waiting for the currently selected color.
-      // (Its region perimeter is outlined in a separate pass.)
-      ctx.fillStyle = '#ffffff';
+      // In pulse mode it gently tints from white toward the color and back.
+      const a = this.pulseAmt;
+      ctx.fillStyle = a > 0
+        ? `rgb(${clamp8(255 - (255 - col[0]) * a)},${clamp8(255 - (255 - col[1]) * a)},${clamp8(255 - (255 - col[2]) * a)})`
+        : '#ffffff';
       ctx.fill();
     } else {
       // Muted: a dimmed tint of the cell's real color so the picture still
@@ -574,6 +646,7 @@ class Editor {
     clearTimeout(this.saveTimer);
     clearTimeout(this._wheelIdle);
     cancelAnimationFrame(this._raf);
+    cancelAnimationFrame(this._pulseRaf);
     this.ac.abort();
     this.ro?.disconnect();
     this.setTool('dot');
