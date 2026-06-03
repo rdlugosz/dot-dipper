@@ -31,10 +31,13 @@ class Editor {
     this.lastPaintIdx = -1;
     this.saveTimer = null;
     this.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this._raf = 0;
+    this.interacting = false;   // true during a pan/zoom/paint gesture (skips text)
 
     this.totals = new Array(this.p.palette.length).fill(0);
     for (const t of this.p.grid) this.totals[t]++;
     this.selected = this.firstUnfinished();
+    this.buildGemSprites();
 
     document.getElementById('editorTitle').textContent = this.p.name;
     this.bindUI();
@@ -44,6 +47,35 @@ class Editor {
     this.updateProgress();
     this.draw();
     this.observeResize();
+  }
+
+  // Pre-render each palette color as a glossy gem once, so drawing a placed cell
+  // is a single drawImage instead of an arc + radial gradient every frame.
+  buildGemSprites() {
+    const S = 128;
+    this.gemSprites = this.p.palette.map(c => {
+      const cv = document.createElement('canvas');
+      cv.width = cv.height = S;
+      const g = cv.getContext('2d');
+      const m = S / 2, rad = m * 0.94;
+      g.beginPath();
+      g.arc(m, m, rad, 0, 7);
+      g.fillStyle = `rgb(${c[0]},${c[1]},${c[2]})`;
+      g.fill();
+      const grd = g.createRadialGradient(m - rad * 0.35, m - rad * 0.35, rad * 0.1, m, m, rad);
+      grd.addColorStop(0, 'rgba(255,255,255,0.55)');
+      grd.addColorStop(0.45, 'rgba(255,255,255,0.06)');
+      grd.addColorStop(1, 'rgba(0,0,0,0.22)');
+      g.fillStyle = grd;
+      g.fill();
+      return cv;
+    });
+  }
+
+  // Coalesce repaint requests into one render per animation frame.
+  scheduleDraw() {
+    if (this._raf) return;
+    this._raf = requestAnimationFrame(() => { this._raf = 0; this.draw(); });
   }
 
   /* ---------- setup ---------- */
@@ -149,11 +181,14 @@ class Editor {
     const y0 = Math.max(0, Math.floor(-this.oy / cell));
     const x1 = Math.min(cols, Math.ceil((this.cssW - this.ox) / cell) + 1);
     const y1 = Math.min(rows, Math.ceil((this.cssH - this.oy) / cell) + 1);
-    const showNum = cell >= MIN_LABEL;
+    // Numbers are the costliest part — skip them mid-gesture, restore at rest.
+    const showNum = cell >= MIN_LABEL && !this.interacting;
 
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.font = `${Math.floor(cell * 0.42)}px system-ui, sans-serif`;
+    if (showNum) {
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `${Math.floor(cell * 0.42)}px system-ui, sans-serif`;
+    }
 
     for (let y = y0; y < y1; y++) {
       for (let x = x0; x < x1; x++) {
@@ -169,33 +204,28 @@ class Editor {
     const r = cell - pad * 2;
 
     if (placed >= 0) {
-      const c = this.p.palette[placed];
-      const cx = sx + cell / 2, cy = sy + cell / 2, rad = r / 2;
-      ctx.beginPath();
-      ctx.arc(cx, cy, rad, 0, 7);
-      ctx.fillStyle = `rgb(${c[0]},${c[1]},${c[2]})`;
-      ctx.fill();
-      const g = ctx.createRadialGradient(cx - rad * 0.35, cy - rad * 0.35, rad * 0.1, cx, cy, rad);
-      g.addColorStop(0, 'rgba(255,255,255,0.55)');
-      g.addColorStop(0.45, 'rgba(255,255,255,0.06)');
-      g.addColorStop(1, 'rgba(0,0,0,0.22)');
-      ctx.fillStyle = g;
-      ctx.fill();
+      ctx.drawImage(this.gemSprites[placed], sx + pad, sy + pad, r, r);
       return;
     }
 
     const isSel = target === this.selected;
     const col = this.p.palette[target];
     roundRect(ctx, sx + pad, sy + pad, r, r, Math.min(5, cell * 0.18));
-    ctx.fillStyle = isSel ? '#ffffff' : '#2a2740';
-    ctx.fill();
     if (isSel) {
+      // Highlight: a bright cell waiting for the currently selected color.
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
       ctx.lineWidth = Math.max(1, cell * 0.07);
       ctx.strokeStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
       ctx.stroke();
+    } else {
+      // Muted: a dimmed tint of the cell's real color so the picture still
+      // reads and you keep your bearings, instead of a black-and-white look.
+      ctx.fillStyle = mutedColor(col);
+      ctx.fill();
     }
     if (showNum) {
-      ctx.fillStyle = isSel ? `rgb(${col[0]},${col[1]},${col[2]})` : '#8a86a8';
+      ctx.fillStyle = isSel ? `rgb(${col[0]},${col[1]},${col[2]})` : numberInk(col);
       ctx.fillText(String(target + 1), sx + cell / 2, sy + cell / 2 + cell * 0.03);
     }
   }
@@ -205,6 +235,7 @@ class Editor {
   onDown(e) {
     this.canvas.setPointerCapture(e.pointerId);
     this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    this.interacting = true;
 
     if (this.pointers.size >= 2) { this.pinch = null; return; }
     this.lastPaintIdx = -1;
@@ -226,7 +257,7 @@ class Editor {
       this.oy += e.clientY - this.panFrom.y;
       this.panFrom = { x: e.clientX, y: e.clientY };
       this.clampOffset();
-      this.draw();
+      this.scheduleDraw();
     } else if (this.tool !== 'hand') {
       this.paintAt(e.clientX, e.clientY);
     }
@@ -235,7 +266,12 @@ class Editor {
   onUp(e) {
     this.pointers.delete(e.pointerId);
     if (this.pointers.size < 2) this.pinch = null;
-    if (this.pointers.size === 0) { this.panFrom = null; this.lastPaintIdx = -1; }
+    if (this.pointers.size === 0) {
+      this.panFrom = null;
+      this.lastPaintIdx = -1;
+      this.interacting = false;   // gesture over — redraw once with numbers
+      this.scheduleDraw();
+    }
   }
 
   handlePinch() {
@@ -248,7 +284,7 @@ class Editor {
       this.ox += mx - this.pinch.mx;
       this.oy += my - this.pinch.my;
       this.clampOffset();
-      this.draw();
+      this.scheduleDraw();
     }
     this.pinch = { dist, mx, my };
   }
@@ -258,7 +294,11 @@ class Editor {
     const r = this.canvas.getBoundingClientRect();
     this.zoomAround(Math.exp(-e.deltaY * 0.0015), e.clientX - r.left, e.clientY - r.top);
     this.clampOffset();
-    this.draw();
+    // Wheel zoom (desktop) has no gesture end; briefly drop numbers, then restore.
+    this.interacting = true;
+    this.scheduleDraw();
+    clearTimeout(this._wheelIdle);
+    this._wheelIdle = setTimeout(() => { this.interacting = false; this.scheduleDraw(); }, 140);
   }
 
   zoomAround(factor, sx, sy) {
@@ -317,7 +357,7 @@ class Editor {
   }
 
   afterChange() {
-    this.draw();
+    this.scheduleDraw();
     this.updateProgress();
     this.scheduleSave();
   }
@@ -343,7 +383,7 @@ class Editor {
   selectColor(i) {
     this.selected = i;
     this.swatches.forEach((el, n) => el.classList.toggle('sel', n === i));
-    this.draw();
+    this.scheduleDraw();
     const el = this.swatches[i];
     if (el) el.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
   }
@@ -404,6 +444,8 @@ class Editor {
 
   destroy() {
     clearTimeout(this.saveTimer);
+    clearTimeout(this._wheelIdle);
+    cancelAnimationFrame(this._raf);
     this.ac.abort();
     this.ro?.disconnect();
     this.setTool('dot');
@@ -412,6 +454,24 @@ class Editor {
 }
 
 /* ---------- helpers ---------- */
+
+const MUTE_BASE = [22, 20, 39]; // board background (#161427)
+
+// A dimmed tint of a palette color: keeps the hue (so the picture still reads)
+// but blends toward the dark background so highlighted cells clearly stand out.
+function mutedColor(col) {
+  const t = 0.62;
+  const r = Math.round(col[0] * (1 - t) + MUTE_BASE[0] * t);
+  const g = Math.round(col[1] * (1 - t) + MUTE_BASE[1] * t);
+  const b = Math.round(col[2] * (1 - t) + MUTE_BASE[2] * t);
+  return `rgb(${r},${g},${b})`;
+}
+
+// A faint, legible number on a muted cell (light ink on dark tints, dark on light).
+function numberInk(col) {
+  const mutedLum = (0.299 * col[0] + 0.587 * col[1] + 0.114 * col[2]) * 0.38 + 9;
+  return mutedLum > 120 ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.4)';
+}
 
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
