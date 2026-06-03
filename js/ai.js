@@ -1,16 +1,14 @@
-// Keyless, client-side AI image generation via Pollinations.ai.
-// No API key and no backend: we just request an image URL and load it with CORS
-// enabled so its pixels can be read for posterizing.
+// Client-side AI image generation via Pollinations.ai (no backend).
+//
+// Pollinations' anonymous tier is heavily rate-limited (roughly one image every
+// 15 seconds) and may add a small watermark. Passing a `referrer` is the
+// documented way for keyless web apps to use it. For more reliable, watermark-
+// free results, register a FREE token at https://auth.pollinations.ai and paste
+// it below — it unlocks the "seed" tier (about one image every 5 seconds).
+const POLLINATIONS_TOKEN = ''; // optional free token; leave '' for anonymous use
 
-export function loadImage(src, crossOrigin) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    if (crossOrigin) img.crossOrigin = 'anonymous';
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('Could not load the image.'));
-    img.src = src;
-  });
-}
+const REFERRER = (typeof location !== 'undefined' && location.hostname) || 'dot-dipper';
+const delay = ms => new Promise(r => setTimeout(r, ms));
 
 export function fileToImage(file) {
   return new Promise((resolve, reject) => {
@@ -22,11 +20,47 @@ export function fileToImage(file) {
   });
 }
 
-export function generateImage(prompt, { size = 640, seed } = {}) {
+export async function generateImage(prompt, { size = 640, seed } = {}) {
   // Steer toward kid-friendly, simple imagery and enable the provider's safe flag.
   const styled = `${prompt}, cute, colorful, simple bold shapes, children's illustration, clip art style, plain background`;
-  const s = seed ?? Math.floor(Math.random() * 1e6);
-  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(styled)}`
-    + `?width=${size}&height=${size}&nologo=true&safe=true&seed=${s}`;
-  return loadImage(url, true);
+  const params = new URLSearchParams({
+    width: size, height: size, nologo: 'true', safe: 'true',
+    seed: seed ?? Math.floor(Math.random() * 1e6), referrer: REFERRER,
+  });
+  if (POLLINATIONS_TOKEN) params.set('token', POLLINATIONS_TOKEN);
+  const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(styled)}?${params}`;
+
+  let lastErr;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await delay(5000); // wait out the per-IP rate window, then retry
+    try {
+      const resp = await fetch(url, { headers: { Accept: 'image/*' } });
+      // 402 (the "x402" pay/queue wall) and 429 both mean "rate-limited, retry".
+      if (resp.status === 402 || resp.status === 429) { lastErr = rateError(); continue; }
+      if (!resp.ok) throw new Error(`The image service returned an error (${resp.status}).`);
+      const blob = await resp.blob();
+      if (!blob.type.startsWith('image/')) { lastErr = rateError(); continue; }
+      return await blobToImage(blob);
+    } catch (e) {
+      lastErr = e; // network hiccup — retry
+    }
+  }
+  throw lastErr || new Error('Could not generate an image.');
+}
+
+function rateError() {
+  const e = new Error('The free AI service is busy right now.');
+  e.code = 'rate';
+  return e;
+}
+
+function blobToImage(blob) {
+  // A same-origin object URL — the canvas won't be tainted, so pixels are readable.
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not decode the image.')); };
+    img.src = url;
+  });
 }

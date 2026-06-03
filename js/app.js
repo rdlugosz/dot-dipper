@@ -126,7 +126,9 @@ function renderAiStep() {
     <div id="aiStatus"></div>
     <button class="btn-ghost" id="backSrc">Back</button>
     <p class="note">Images come from a free public AI service (Pollinations.ai) with its
-    safe filter on. It's not a closed garden, so a grown-up should glance at results.</p>`;
+    safe filter on. It's rate-limited (about one picture every 15s) and may add a small
+    watermark, so it can be slow or busy — just try again, or use a photo / sample.
+    It's not a closed garden, so a grown-up should glance at results.</p>`;
   const prompt = modalCard.querySelector('#aiPrompt');
   modalCard.querySelector('#backSrc').onclick = renderSourceStep;
   modalCard.querySelector('#genBtn').onclick = async () => {
@@ -134,15 +136,17 @@ function renderAiStep() {
     if (!text) { prompt.focus(); return; }
     const status = modalCard.querySelector('#aiStatus');
     status.innerHTML = `<div class="field" style="display:flex;align-items:center;gap:12px">
-      <div class="spinner"></div><span>Generating… this can take 10–20s.</span></div>`;
+      <div class="spinner"></div><span>Generating… this can take 10–30s.</span></div>`;
     modalCard.querySelector('#genBtn').disabled = true;
     try {
       state.source = await generateImage(text);
       state.name = text.slice(0, 28);
       renderConfigStep();
     } catch (e) {
-      status.innerHTML = `<div class="error">Couldn't generate that image. Check your
-        connection and try again, or use a photo / sample.</div>`;
+      const busy = e && e.code === 'rate';
+      status.innerHTML = `<div class="error">${busy
+        ? 'The free AI service is busy (it only allows one picture every several seconds). Wait a few seconds and tap Generate again — or use a photo / sample.'
+        : "Couldn't generate that image. Check the connection and try again, or use a photo / sample."}</div>`;
       modalCard.querySelector('#genBtn').disabled = false;
     }
   };
