@@ -5,9 +5,10 @@
 // cache is kept up to date as an offline fallback. Cross-origin requests (e.g.
 // AI images) are left to the network. Bump CACHE whenever the shell changes to
 // retire old caches.
-const CACHE = 'dotdipper-v2';
+const CACHE = 'dotdipper-v3';
 const ASSETS = [
-  './', './index.html', './css/styles.css', './manifest.json', './icon.svg',
+  './', './index.html', './css/styles.css', './manifest.json',
+  './icon.svg', './icon-192.png', './icon-512.png', './apple-touch-icon.png',
   './js/app.js', './js/editor.js', './js/process.js', './js/quantize.js',
   './js/samples.js', './js/ai.js', './js/storage.js',
 ];

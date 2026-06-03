@@ -433,12 +433,70 @@ async function initUpdateChecks() {
   setInterval(checkForUpdate, 15 * 60 * 1000);
 }
 
+/* ---------- "install as app" prompt ---------- */
+
+let deferredInstall = null;
+
+function isStandalone() {
+  return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+}
+function isIOS() {
+  const ua = navigator.userAgent;
+  return /iphone|ipad|ipod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+}
+
+function setupInstall() {
+  const btn = document.getElementById('installBtn');
+  if (!btn || isStandalone()) return;   // already installed → nothing to do
+
+  // Chrome/Edge/Android: capture the native prompt and show our button.
+  window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault();
+    deferredInstall = e;
+    btn.classList.remove('hidden');
+  });
+  window.addEventListener('appinstalled', () => {
+    deferredInstall = null;
+    btn.classList.add('hidden');
+  });
+  // iOS Safari has no install API — show the button so we can give instructions.
+  if (isIOS()) btn.classList.remove('hidden');
+
+  btn.onclick = async () => {
+    if (deferredInstall) {
+      deferredInstall.prompt();
+      const { outcome } = await deferredInstall.userChoice;
+      deferredInstall = null;
+      if (outcome === 'accepted') btn.classList.add('hidden');
+    } else {
+      showInstallHelp();
+    }
+  };
+}
+
+function showInstallHelp() {
+  showModal((card, close) => {
+    const ios = isIOS();
+    card.innerHTML = `
+      <h2>📲 Install Dot Dipper</h2>
+      <p class="hint">Add it to your home screen to play like a real app — full screen and offline.</p>
+      ${ios
+        ? `<p>1. Tap the <b>Share</b> button (the square with an ↑) in Safari's toolbar.<br>
+             2. Choose <b>Add to Home Screen</b>.<br>
+             3. Tap <b>Add</b>.</p>`
+        : `<p>Open your browser's menu (⋮) and choose <b>Install app</b> / <b>Add to Home screen</b>.</p>`}
+      <button class="btn-primary" id="installOk">Got it</button>`;
+    card.querySelector('#installOk').onclick = close;
+  });
+}
+
 /* ---------- boot ---------- */
 
 document.getElementById('newBtn').addEventListener('click', openNewModal);
 modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
 
 renderHome();
+setupInstall();
 initUpdateChecks();
 
 if ('serviceWorker' in navigator) {
