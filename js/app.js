@@ -1,7 +1,7 @@
 // Main controller: home/library screen, the "new picture" flow (upload / AI /
 // sample), and routing into the full-screen editor.
 
-import { listProjects, getProject, saveProject, deleteProject, newId } from './storage.js';
+import { listProjects, getProject, saveProject, deleteProject, newId, getDotsPlaced } from './storage.js';
 import { processImage } from './process.js';
 import { SAMPLES, sampleThumb, sampleSource } from './samples.js';
 import { generateImage, fileToImage, clipboardToImage } from './ai.js';
@@ -38,6 +38,9 @@ function renderHome() {
   const list = listProjects();
   const grid = document.getElementById('projectList');
   grid.innerHTML = '';
+
+  const dots = getDotsPlaced();
+  document.getElementById('dotStat').textContent = `💎 ${dots.toLocaleString()} dots placed`;
 
   if (list.length === 0) {
     grid.innerHTML = `<div class="empty-state">

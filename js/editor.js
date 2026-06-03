@@ -2,7 +2,7 @@
 // fills in paint-by-number style. Selecting a color highlights every cell that
 // needs it; tapping (or dragging across) those cells places the gems.
 
-import { saveProject } from './storage.js';
+import { saveProject, addDotsPlaced } from './storage.js';
 
 const CELL = 20;        // world units per cell
 const MIN_LABEL = 15;   // show numbers only when cells are at least this big (px)
@@ -437,6 +437,7 @@ class Editor {
     }
     if (changes.length) {
       this.history.push(changes);   // one undo step per brush dab
+      if (!erase) addDotsPlaced(changes.length);   // lifetime stat (placements only)
       this.afterChange();
     }
   }
@@ -444,6 +445,8 @@ class Editor {
   undo() {
     const group = this.history.pop();
     if (!group) return;
+    // If this group was a placement (cells went from empty), reverse the stat.
+    if (group.length && group[0].prev < 0) addDotsPlaced(-group.length);
     for (const c of group) this.p.filled[c.idx] = c.prev;
     this.afterChange();
   }
