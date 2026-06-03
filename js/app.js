@@ -3,7 +3,7 @@
 
 import { listProjects, getProject, saveProject, deleteProject, newId } from './storage.js';
 import { processImage } from './process.js';
-import { SAMPLES } from './samples.js';
+import { SAMPLES, sampleThumb, sampleSource } from './samples.js';
 import { generateImage, fileToImage, clipboardToImage } from './ai.js';
 import { openEditor } from './editor.js';
 
@@ -196,10 +196,18 @@ function renderSampleStep() {
   modalCard.querySelector('#backSrc').onclick = renderSourceStep;
   const grid = modalCard.querySelector('#sampleGrid');
   for (const s of SAMPLES) {
-    const c = s.build(120);
+    const c = document.createElement('canvas');
+    c.width = c.height = 120;
     c.title = s.name;
-    c.onclick = () => { state.source = s.build(360); state.name = s.name; renderConfigStep(); };
+    c.onclick = async () => {
+      try {
+        state.source = await sampleSource(s);
+        state.name = s.name;
+        renderConfigStep();
+      } catch (e) { alert(e.message); }
+    };
     grid.appendChild(c);
+    sampleThumb(s, 120).then(tc => c.getContext('2d').drawImage(tc, 0, 0)).catch(() => {});
   }
 }
 

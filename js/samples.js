@@ -1,6 +1,7 @@
-// Built-in sample pictures, drawn on a canvas at runtime. These use flat shapes
-// and gradients, which posterize cleanly into satisfying dot pictures — and they
-// work fully offline with no external requests.
+// Built-in sample pictures. Most are drawn on a canvas at runtime from flat
+// shapes/gradients; some are bundled photos (data URLs). All work fully offline.
+
+import { DOG } from './sample-images.js';
 
 function make(size, draw) {
   const c = document.createElement('canvas');
@@ -12,6 +13,7 @@ function make(size, draw) {
 function bg(ctx, s, color) { ctx.fillStyle = color; ctx.fillRect(0, 0, s, s); }
 
 export const SAMPLES = [
+  { name: 'Puppy', src: DOG },   // bundled photo sample
   {
     name: 'Rainbow',
     build: s => make(s, (ctx, S) => {
@@ -106,3 +108,40 @@ export const SAMPLES = [
     }),
   },
 ];
+
+// ---- accessors (handle both vector and photo samples) ----
+
+const imgCache = {};
+function loadImage(src) {
+  if (!imgCache[src]) {
+    imgCache[src] = new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Could not load sample image.'));
+      img.src = src;
+    });
+  }
+  return imgCache[src];
+}
+
+// A square thumbnail for the picker (photos are center-cropped to fill).
+export async function sampleThumb(sample, size) {
+  if (sample.build) return sample.build(size);
+  const img = await loadImage(sample.src);
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const ctx = c.getContext('2d');
+  const s = Math.max(size / img.naturalWidth, size / img.naturalHeight);
+  const w = img.naturalWidth * s, h = img.naturalHeight * s;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, size, size);
+  ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+  return c;
+}
+
+// The source passed to image processing: a photo keeps its real aspect ratio;
+// a vector sample is rendered to a square canvas.
+export async function sampleSource(sample) {
+  if (sample.build) return sample.build(420);
+  return loadImage(sample.src);
+}
