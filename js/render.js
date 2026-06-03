@@ -137,3 +137,87 @@ export function showFinishedArt(p) {
   img.onclick = () => ov.classList.toggle('bare');  // hide UI for a clean screenshot
   document.body.appendChild(ov);
 }
+
+// ---- printable paint-by-number chart ----
+
+const escHtml = s => String(s).replace(/[&<>"]/g, c =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// A print-friendly chart: white cells with each color's number, faint color
+// guide tints, light gridlines, and heavier lines every 5 cells for counting.
+export function renderChart(p) {
+  const { cols, rows, grid, palette } = p;
+  const cell = Math.max(12, Math.min(28, Math.floor(2600 / Math.max(cols, rows))));
+  const c = document.createElement('canvas');
+  c.width = cols * cell;
+  c.height = rows * cell;
+  const g = c.getContext('2d');
+  g.fillStyle = '#fff';
+  g.fillRect(0, 0, c.width, c.height);
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.font = `${Math.floor(cell * 0.5)}px system-ui, sans-serif`;
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      const col = palette[grid[y * cols + x]];
+      const sx = x * cell, sy = y * cell;
+      g.fillStyle = `rgb(${clamp8(255 - (255 - col[0]) * 0.18)},${clamp8(255 - (255 - col[1]) * 0.18)},${clamp8(255 - (255 - col[2]) * 0.18)})`;
+      g.fillRect(sx, sy, cell, cell);
+      g.fillStyle = '#222';
+      g.fillText(String(grid[y * cols + x] + 1), sx + cell / 2, sy + cell / 2 + cell * 0.04);
+    }
+  }
+  const lines = (step, color, width) => {
+    g.strokeStyle = color; g.lineWidth = width;
+    g.beginPath();
+    for (let x = 0; x <= cols; x += step) { g.moveTo(x * cell + 0.5, 0); g.lineTo(x * cell + 0.5, c.height); }
+    for (let y = 0; y <= rows; y += step) { g.moveTo(0, y * cell + 0.5); g.lineTo(c.width, y * cell + 0.5); }
+    g.stroke();
+  };
+  lines(1, '#c8c8c8', 1);
+  lines(5, '#777', 1.5);
+  return c;
+}
+
+export function printChart(p) {
+  const url = renderChart(p).toDataURL('image/png');
+  const legend = p.palette.map((col, i) =>
+    `<div class="leg"><span class="sw" style="background:rgb(${col[0]},${col[1]},${col[2]})"></span>${i + 1}</div>`
+  ).join('');
+  const html = `<!doctype html><html><head><meta charset="utf-8">
+    <title>${escHtml(p.name)} — chart</title>
+    <style>
+      @page { margin: 10mm; }
+      body { font-family: system-ui, sans-serif; color: #111; margin: 0; padding: 8px;
+             -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      h1 { font-size: 16px; margin: 0 0 6px; }
+      .meta { font-size: 11px; color: #555; margin-bottom: 8px; }
+      img.chart { width: 100%; height: auto; image-rendering: pixelated; display: block; }
+      h2 { font-size: 13px; margin: 12px 0 6px; }
+      .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; }
+      .leg { display: flex; align-items: center; gap: 5px; }
+      .sw { width: 14px; height: 14px; border: 1px solid #999; display: inline-block; }
+    </style></head><body>
+      <h1>${escHtml(p.name)} — color-by-number chart</h1>
+      <div class="meta">${p.cols} × ${p.rows} · ${p.palette.length} colors · heavier lines every 5 squares</div>
+      <img class="chart" src="${url}">
+      <h2>Colors</h2>
+      <div class="legend">${legend}</div>
+    </body></html>`;
+
+  // Print via a hidden iframe (more reliable than window.open on mobile/PWAs).
+  const iframe = document.createElement('iframe');
+  iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+  document.body.appendChild(iframe);
+  const doc = iframe.contentWindow.document;
+  doc.open();
+  doc.write(html);
+  doc.close();
+  const img = doc.querySelector('img');
+  const go = () => {
+    try { iframe.contentWindow.focus(); iframe.contentWindow.print(); } catch {}
+    setTimeout(() => iframe.remove(), 1000);
+  };
+  if (img.complete) go(); else img.onload = go;
+}
+
