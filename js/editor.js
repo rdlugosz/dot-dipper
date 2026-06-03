@@ -1,0 +1,398 @@
+// Full-screen editor: a zoomable / pannable grid of "gem" cells that the player
+// fills in paint-by-number style. Selecting a color highlights every cell that
+// needs it; tapping (or dragging across) those cells places the gems.
+
+import { saveProject } from './storage.js';
+
+const CELL = 20;        // world units per cell
+const MIN_LABEL = 15;   // show numbers only when cells are at least this big (px)
+
+export function openEditor(project, onExit) {
+  return new Editor(project, onExit);
+}
+
+class Editor {
+  constructor(project, onExit) {
+    this.p = project;
+    this.onExit = onExit;
+    if (!this.p.filled) this.p.filled = new Array(this.p.grid.length).fill(-1);
+
+    this.canvas = document.getElementById('board');
+    this.ctx = this.canvas.getContext('2d');
+    this.ac = new AbortController();
+
+    this.scale = 1;
+    this.ox = 0;
+    this.oy = 0;
+    this.tool = 'dot';            // 'dot' | 'hand' | 'erase'
+    this.history = [];
+    this.pointers = new Map();
+    this.pinch = null;
+    this.lastPaintIdx = -1;
+    this.saveTimer = null;
+    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+    this.totals = new Array(this.p.palette.length).fill(0);
+    for (const t of this.p.grid) this.totals[t]++;
+    this.selected = this.firstUnfinished();
+
+    document.getElementById('editorTitle').textContent = this.p.name;
+    this.bindUI();
+    this.resize();
+    this.fit();
+    this.renderPalette();
+    this.updateProgress();
+  }
+
+  /* ---------- setup ---------- */
+
+  bindUI() {
+    const sig = { signal: this.ac.signal };
+    const on = (id, fn) => document.getElementById(id).addEventListener('click', fn, sig);
+
+    on('backBtn', () => { this.flushSave(); this.destroy(); this.onExit(); });
+    on('undoBtn', () => this.undo());
+    on('fitBtn', () => { this.fit(); this.draw(); });
+    on('handBtn', () => this.setTool(this.tool === 'hand' ? 'dot' : 'hand'));
+    on('eraseBtn', () => this.setTool(this.tool === 'erase' ? 'dot' : 'erase'));
+    document.getElementById('celebrateClose')
+      .addEventListener('click', () => document.getElementById('celebrate').classList.add('hidden'), sig);
+
+    const c = this.canvas;
+    c.addEventListener('pointerdown', e => this.onDown(e), sig);
+    c.addEventListener('pointermove', e => this.onMove(e), sig);
+    c.addEventListener('pointerup', e => this.onUp(e), sig);
+    c.addEventListener('pointercancel', e => this.onUp(e), sig);
+    c.addEventListener('wheel', e => this.onWheel(e), { passive: false, signal: this.ac.signal });
+    window.addEventListener('resize', () => { this.resize(); this.clampOffset(); this.draw(); }, sig);
+  }
+
+  setTool(t) {
+    this.tool = t;
+    document.getElementById('handBtn').classList.toggle('active', t === 'hand');
+    document.getElementById('eraseBtn').classList.toggle('active', t === 'erase');
+  }
+
+  resize() {
+    const r = this.canvas.getBoundingClientRect();
+    this.cssW = r.width;
+    this.cssH = r.height;
+    this.canvas.width = Math.round(r.width * this.dpr);
+    this.canvas.height = Math.round(r.height * this.dpr);
+  }
+
+  fit() {
+    const gw = this.p.cols * CELL, gh = this.p.rows * CELL;
+    this.minScale = Math.min(this.cssW / gw, this.cssH / gh) * 0.95;
+    this.maxScale = Math.max(this.minScale * 6, 80 / CELL);
+    this.scale = this.minScale;
+    this.ox = (this.cssW - gw * this.scale) / 2;
+    this.oy = (this.cssH - gh * this.scale) / 2;
+  }
+
+  /* ---------- rendering ---------- */
+
+  draw() {
+    const ctx = this.ctx;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.fillStyle = '#161427';
+    ctx.fillRect(0, 0, this.cssW, this.cssH);
+
+    const { cols, rows } = this.p;
+    const cell = CELL * this.scale;
+    const x0 = Math.max(0, Math.floor(-this.ox / cell));
+    const y0 = Math.max(0, Math.floor(-this.oy / cell));
+    const x1 = Math.min(cols, Math.ceil((this.cssW - this.ox) / cell) + 1);
+    const y1 = Math.min(rows, Math.ceil((this.cssH - this.oy) / cell) + 1);
+    const showNum = cell >= MIN_LABEL;
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `${Math.floor(cell * 0.42)}px system-ui, sans-serif`;
+
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        this.drawCell(ctx, this.ox + x * cell, this.oy + y * cell, cell, y * cols + x, showNum);
+      }
+    }
+  }
+
+  drawCell(ctx, sx, sy, cell, idx, showNum) {
+    const target = this.p.grid[idx];
+    const placed = this.p.filled[idx];
+    const pad = cell * 0.06;
+    const r = cell - pad * 2;
+
+    if (placed >= 0) {
+      const c = this.p.palette[placed];
+      const cx = sx + cell / 2, cy = sy + cell / 2, rad = r / 2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rad, 0, 7);
+      ctx.fillStyle = `rgb(${c[0]},${c[1]},${c[2]})`;
+      ctx.fill();
+      const g = ctx.createRadialGradient(cx - rad * 0.35, cy - rad * 0.35, rad * 0.1, cx, cy, rad);
+      g.addColorStop(0, 'rgba(255,255,255,0.55)');
+      g.addColorStop(0.45, 'rgba(255,255,255,0.06)');
+      g.addColorStop(1, 'rgba(0,0,0,0.22)');
+      ctx.fillStyle = g;
+      ctx.fill();
+      return;
+    }
+
+    const isSel = target === this.selected;
+    const col = this.p.palette[target];
+    roundRect(ctx, sx + pad, sy + pad, r, r, Math.min(5, cell * 0.18));
+    ctx.fillStyle = isSel ? '#ffffff' : '#2a2740';
+    ctx.fill();
+    if (isSel) {
+      ctx.lineWidth = Math.max(1, cell * 0.07);
+      ctx.strokeStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
+      ctx.stroke();
+    }
+    if (showNum) {
+      ctx.fillStyle = isSel ? `rgb(${col[0]},${col[1]},${col[2]})` : '#8a86a8';
+      ctx.fillText(String(target + 1), sx + cell / 2, sy + cell / 2 + cell * 0.03);
+    }
+  }
+
+  /* ---------- pointer handling ---------- */
+
+  onDown(e) {
+    this.canvas.setPointerCapture(e.pointerId);
+    this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (this.pointers.size >= 2) { this.pinch = null; return; }
+    this.lastPaintIdx = -1;
+    if (this.tool === 'hand') {
+      this.panFrom = { x: e.clientX, y: e.clientY };
+    } else {
+      this.paintAt(e.clientX, e.clientY);
+    }
+  }
+
+  onMove(e) {
+    if (!this.pointers.has(e.pointerId)) return;
+    this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (this.pointers.size >= 2) { this.handlePinch(); return; }
+
+    if (this.tool === 'hand' && this.panFrom) {
+      this.ox += e.clientX - this.panFrom.x;
+      this.oy += e.clientY - this.panFrom.y;
+      this.panFrom = { x: e.clientX, y: e.clientY };
+      this.clampOffset();
+      this.draw();
+    } else if (this.tool !== 'hand') {
+      this.paintAt(e.clientX, e.clientY);
+    }
+  }
+
+  onUp(e) {
+    this.pointers.delete(e.pointerId);
+    if (this.pointers.size < 2) this.pinch = null;
+    if (this.pointers.size === 0) { this.panFrom = null; this.lastPaintIdx = -1; }
+  }
+
+  handlePinch() {
+    const pts = [...this.pointers.values()];
+    const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    const mx = (pts[0].x + pts[1].x) / 2;
+    const my = (pts[0].y + pts[1].y) / 2;
+    if (this.pinch) {
+      this.zoomAround(dist / this.pinch.dist, mx, my);
+      this.ox += mx - this.pinch.mx;
+      this.oy += my - this.pinch.my;
+      this.clampOffset();
+      this.draw();
+    }
+    this.pinch = { dist, mx, my };
+  }
+
+  onWheel(e) {
+    e.preventDefault();
+    const r = this.canvas.getBoundingClientRect();
+    this.zoomAround(Math.exp(-e.deltaY * 0.0015), e.clientX - r.left, e.clientY - r.top);
+    this.clampOffset();
+    this.draw();
+  }
+
+  zoomAround(factor, sx, sy) {
+    const ns = Math.max(this.minScale, Math.min(this.maxScale, this.scale * factor));
+    const k = ns / this.scale;
+    this.ox = sx - (sx - this.ox) * k;
+    this.oy = sy - (sy - this.oy) * k;
+    this.scale = ns;
+  }
+
+  clampOffset() {
+    const gw = this.p.cols * CELL * this.scale;
+    const gh = this.p.rows * CELL * this.scale;
+    const m = 60;
+    this.ox = Math.min(this.cssW - m, Math.max(m - gw, this.ox));
+    this.oy = Math.min(this.cssH - m, Math.max(m - gh, this.oy));
+  }
+
+  /* ---------- placement ---------- */
+
+  cellAt(clientX, clientY) {
+    const r = this.canvas.getBoundingClientRect();
+    const cell = CELL * this.scale;
+    const x = Math.floor((clientX - r.left - this.ox) / cell);
+    const y = Math.floor((clientY - r.top - this.oy) / cell);
+    if (x < 0 || y < 0 || x >= this.p.cols || y >= this.p.rows) return -1;
+    return y * this.p.cols + x;
+  }
+
+  paintAt(clientX, clientY) {
+    const idx = this.cellAt(clientX, clientY);
+    if (idx < 0 || idx === this.lastPaintIdx) return;
+    this.lastPaintIdx = idx;
+
+    if (this.tool === 'erase') {
+      if (this.p.filled[idx] >= 0) {
+        this.history.push({ idx, prev: this.p.filled[idx] });
+        this.p.filled[idx] = -1;
+        this.afterChange();
+      }
+      return;
+    }
+    // Dot tool: only place on cells that match the selected color (no mistakes).
+    if (this.p.grid[idx] === this.selected && this.p.filled[idx] < 0) {
+      this.history.push({ idx, prev: -1 });
+      this.p.filled[idx] = this.selected;
+      this.afterChange();
+    }
+  }
+
+  undo() {
+    const last = this.history.pop();
+    if (!last) return;
+    this.p.filled[last.idx] = last.prev;
+    this.afterChange();
+  }
+
+  afterChange() {
+    this.draw();
+    this.updateProgress();
+    this.scheduleSave();
+  }
+
+  /* ---------- palette + progress ---------- */
+
+  renderPalette() {
+    const bar = document.getElementById('palette');
+    bar.innerHTML = '';
+    this.swatches = this.p.palette.map((c, i) => {
+      const el = document.createElement('button');
+      el.className = 'swatch' + (i === this.selected ? ' sel' : '');
+      el.innerHTML =
+        `<span class="num">${i + 1}</span>` +
+        `<span class="chip" style="background:rgb(${c[0]},${c[1]},${c[2]})"></span>` +
+        `<span class="left"></span>`;
+      el.addEventListener('click', () => this.selectColor(i), { signal: this.ac.signal });
+      bar.appendChild(el);
+      return el;
+    });
+  }
+
+  selectColor(i) {
+    this.selected = i;
+    this.swatches.forEach((el, n) => el.classList.toggle('sel', n === i));
+    this.draw();
+    const el = this.swatches[i];
+    if (el) el.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+  }
+
+  updateProgress() {
+    const placedPer = new Array(this.p.palette.length).fill(0);
+    let placed = 0;
+    for (const v of this.p.filled) if (v >= 0) { placedPer[v]++; placed++; }
+    const total = this.p.grid.length;
+    const pct = Math.round((placed / total) * 100);
+    document.getElementById('progressBar').style.width = pct + '%';
+    document.getElementById('progressPct').textContent = pct + '%';
+
+    this.swatches.forEach((el, i) => {
+      const left = this.totals[i] - placedPer[i];
+      el.querySelector('.left').textContent = left > 0 ? left : '';
+      el.classList.toggle('done', left === 0);
+    });
+
+    // When the current color is finished, jump to the next unfinished one.
+    if (this.totals[this.selected] - placedPer[this.selected] === 0) {
+      const next = this.firstUnfinished(placedPer);
+      if (next !== this.selected) this.selectColor(next);
+    }
+    if (placed === total) this.celebrate();
+  }
+
+  firstUnfinished(placedPer) {
+    const counts = placedPer || (() => {
+      const c = new Array(this.p.palette.length).fill(0);
+      for (const v of this.p.filled) if (v >= 0) c[v]++;
+      return c;
+    })();
+    for (let i = 0; i < this.p.palette.length; i++) {
+      if (this.totals ? this.totals[i] - counts[i] > 0 : true) return i;
+    }
+    return 0;
+  }
+
+  celebrate() {
+    const overlay = document.getElementById('celebrate');
+    if (!overlay.classList.contains('hidden')) return;
+    overlay.classList.remove('hidden');
+    runConfetti(document.getElementById('confetti'));
+  }
+
+  /* ---------- saving / teardown ---------- */
+
+  scheduleSave() {
+    clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => saveProject(this.p), 400);
+  }
+
+  flushSave() {
+    clearTimeout(this.saveTimer);
+    saveProject(this.p);
+  }
+
+  destroy() {
+    clearTimeout(this.saveTimer);
+    this.ac.abort();
+    this.setTool('dot');
+  }
+}
+
+/* ---------- helpers ---------- */
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function runConfetti(canvas) {
+  const ctx = canvas.getContext('2d');
+  canvas.width = innerWidth; canvas.height = innerHeight;
+  const colors = ['#ff4d4d', '#ffd84d', '#4dd964', '#4db8ff', '#7c5cff', '#ff6fae'];
+  const bits = Array.from({ length: 140 }, () => ({
+    x: Math.random() * canvas.width, y: -Math.random() * canvas.height,
+    s: 5 + Math.random() * 7, vy: 2 + Math.random() * 4, vx: -2 + Math.random() * 4,
+    c: colors[(Math.random() * colors.length) | 0], rot: Math.random() * 7, vr: -0.2 + Math.random() * 0.4,
+  }));
+  let frames = 0;
+  (function tick() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (const b of bits) {
+      b.x += b.vx; b.y += b.vy; b.rot += b.vr;
+      ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.rot);
+      ctx.fillStyle = b.c; ctx.fillRect(-b.s / 2, -b.s / 2, b.s, b.s * 0.6); ctx.restore();
+    }
+    if (++frames < 240) requestAnimationFrame(tick);
+  })();
+}
