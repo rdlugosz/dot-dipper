@@ -5,7 +5,7 @@
 // documented way for keyless web apps to use it. For more reliable, watermark-
 // free results, register a FREE token at https://auth.pollinations.ai and paste
 // it below — it unlocks the "seed" tier (about one image every 5 seconds).
-const POLLINATIONS_TOKEN = ''; // optional free token; leave '' for anonymous use
+const POLLINATIONS_TOKEN = 'sk_3bFrcN8CA522T25Pq5Iqk2RZq99R0ANB'; // free seed-tier token
 
 const REFERRER = (typeof location !== 'undefined' && location.hostname) || 'dot-dipper';
 const delay = ms => new Promise(r => setTimeout(r, ms));
@@ -30,11 +30,14 @@ export async function generateImage(prompt, { size = 640, seed } = {}) {
   if (POLLINATIONS_TOKEN) params.set('token', POLLINATIONS_TOKEN);
   const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(styled)}?${params}`;
 
+  const headers = { Accept: 'image/*' };
+  if (POLLINATIONS_TOKEN) headers.Authorization = `Bearer ${POLLINATIONS_TOKEN}`;
+
   let lastErr;
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) await delay(5000); // wait out the per-IP rate window, then retry
     try {
-      const resp = await fetch(url, { headers: { Accept: 'image/*' } });
+      const resp = await fetch(url, { headers });
       // 402 (the "x402" pay/queue wall) and 429 both mean "rate-limited, retry".
       if (resp.status === 402 || resp.status === 429) { lastErr = rateError(); continue; }
       if (!resp.ok) throw new Error(`The image service returned an error (${resp.status}).`);
