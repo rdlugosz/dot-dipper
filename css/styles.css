@@ -79,13 +79,13 @@ body{
 .editor-title{font-weight:600;font-size:.98rem;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .pct{font-size:.78rem;color:var(--muted);flex:0 0 auto;}
 .icon-btn{
-  width:36px;height:36px;flex:0 0 auto;border:none;border-radius:11px;cursor:pointer;
-  background:var(--panel-2);color:var(--text);font-size:1.15rem;line-height:1;
+  width:34px;height:34px;flex:0 0 auto;border:none;border-radius:10px;cursor:pointer;
+  background:var(--panel-2);color:var(--text);font-size:1.1rem;line-height:1;
   display:grid;place-items:center;position:relative;
 }
 .icon-btn:active{transform:scale(.92);}
 .icon-btn.active{background:linear-gradient(135deg,var(--accent),var(--accent-2));}
-.tools{display:flex;gap:4px;flex:0 0 auto;}
+.tools{display:flex;gap:3px;flex:0 0 auto;}
 .badge{
   position:absolute;right:-2px;bottom:-2px;min-width:14px;height:14px;padding:0 3px;
   font-size:.62rem;font-weight:700;line-height:14px;text-align:center;

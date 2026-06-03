@@ -6,6 +6,41 @@ import { saveProject } from './storage.js';
 
 const CELL = 20;        // world units per cell
 const MIN_LABEL = 15;   // show numbers only when cells are at least this big (px)
+const GEM_VARIANTS = 3; // subtly varied shades per color, for an ombre look
+const SHAPES = ['circle', 'diamond', 'square'];
+const SHAPE_GLYPH = { circle: '●', diamond: '◆', square: '■' };
+
+function loadShape() {
+  const s = localStorage.getItem('dotdipper.shape');
+  return SHAPES.includes(s) ? s : 'circle';
+}
+function saveShape(s) { localStorage.setItem('dotdipper.shape', s); }
+
+const clamp8 = v => Math.max(0, Math.min(255, Math.round(v)));
+
+// Deterministic scatter so the ombre shades don't form visible stripes.
+function cellVariant(x, y, n) {
+  let h = (x * 374761393 + y * 668265263) >>> 0;
+  h = ((h ^ (h >>> 13)) * 1274126177) >>> 0;
+  return h % n;
+}
+
+// Builds a gem outline (no fill) of the given shape, centered at (cx, cy).
+function shapePath(g, shape, cx, cy, rad) {
+  if (shape === 'square') {
+    const s = rad * 0.9;
+    roundRect(g, cx - s, cy - s, s * 2, s * 2, s * 0.22);
+    return;
+  }
+  g.beginPath();
+  if (shape === 'diamond') {
+    g.moveTo(cx, cy - rad); g.lineTo(cx + rad, cy);
+    g.lineTo(cx, cy + rad); g.lineTo(cx - rad, cy);
+    g.closePath();
+  } else {
+    g.arc(cx, cy, rad, 0, 7);
+  }
+}
 
 export function openEditor(project, onExit) {
   return new Editor(project, onExit);
@@ -26,6 +61,7 @@ class Editor {
     this.oy = 0;
     this.tool = 'dot';            // 'dot' | 'hand' | 'erase'
     this.brush = 1;               // brush width in cells (1, 2, or 3 → 1/4/9 dots)
+    this.shape = loadShape();     // gem shape: 'circle' | 'diamond' | 'square'
     this.history = [];
     this.pointers = new Map();
     this.pinch = null;
@@ -50,27 +86,57 @@ class Editor {
     this.observeResize();
   }
 
-  // Pre-render each palette color as a glossy gem once, so drawing a placed cell
-  // is a single drawImage instead of an arc + radial gradient every frame.
+  // Pre-render each palette color as a set of glossy gem sprites (a few subtly
+  // varied shades for an ombre effect) in the current shape. Each sprite keeps
+  // the flat template color as a "bed" behind an inset gem, so the template
+  // shows through around the dot. Drawing a placed cell is then one drawImage.
   buildGemSprites() {
-    const S = 128;
+    const S = 128, m = S / 2, rad = m * 0.82;
     this.gemSprites = this.p.palette.map(c => {
-      const cv = document.createElement('canvas');
-      cv.width = cv.height = S;
-      const g = cv.getContext('2d');
-      const m = S / 2, rad = m * 0.94;
-      g.beginPath();
-      g.arc(m, m, rad, 0, 7);
-      g.fillStyle = `rgb(${c[0]},${c[1]},${c[2]})`;
-      g.fill();
-      const grd = g.createRadialGradient(m - rad * 0.35, m - rad * 0.35, rad * 0.1, m, m, rad);
-      grd.addColorStop(0, 'rgba(255,255,255,0.55)');
-      grd.addColorStop(0.45, 'rgba(255,255,255,0.06)');
-      grd.addColorStop(1, 'rgba(0,0,0,0.22)');
-      g.fillStyle = grd;
-      g.fill();
-      return cv;
+      const variants = [];
+      for (let v = 0; v < GEM_VARIANTS; v++) {
+        const jit = (v - (GEM_VARIANTS - 1) / 2) * 14;  // subtle lighter/darker shades
+        const gc = [clamp8(c[0] + jit), clamp8(c[1] + jit), clamp8(c[2] + jit)];
+        const cv = document.createElement('canvas');
+        cv.width = cv.height = S;
+        const g = cv.getContext('2d');
+        // bed = a darker shade of the template color, visible around/behind the
+        // gem (like the canvas grid in real diamond art) so the shape reads while
+        // the template hue still shows through.
+        roundRect(g, S * 0.04, S * 0.04, S * 0.92, S * 0.92, S * 0.14);
+        g.fillStyle = `rgb(${clamp8(c[0] * 0.5)},${clamp8(c[1] * 0.5)},${clamp8(c[2] * 0.5)})`;
+        g.fill();
+        // inset gem in the chosen shape, in the slightly varied shade
+        shapePath(g, this.shape, m, m, rad);
+        g.fillStyle = `rgb(${gc[0]},${gc[1]},${gc[2]})`;
+        g.fill();
+        // glossy highlight, clipped to the gem
+        g.save();
+        shapePath(g, this.shape, m, m, rad);
+        g.clip();
+        const grd = g.createRadialGradient(m - rad * 0.35, m - rad * 0.35, rad * 0.1, m, m, rad);
+        grd.addColorStop(0, 'rgba(255,255,255,0.5)');
+        grd.addColorStop(0.5, 'rgba(255,255,255,0.05)');
+        grd.addColorStop(1, 'rgba(0,0,0,0.22)');
+        g.fillStyle = grd;
+        g.fillRect(0, 0, S, S);
+        g.restore();
+        variants.push(cv);
+      }
+      return variants;
     });
+  }
+
+  cycleShape() {
+    this.shape = SHAPES[(SHAPES.indexOf(this.shape) + 1) % SHAPES.length];
+    saveShape(this.shape);
+    this.buildGemSprites();
+    this.updateShapeBtn();
+    this.scheduleDraw();
+  }
+
+  updateShapeBtn() {
+    document.getElementById('shapeBtn').textContent = SHAPE_GLYPH[this.shape];
   }
 
   // Coalesce repaint requests into one render per animation frame.
@@ -91,8 +157,10 @@ class Editor {
     on('handBtn', () => this.setTool(this.tool === 'hand' ? 'dot' : 'hand'));
     on('eraseBtn', () => this.setTool(this.tool === 'erase' ? 'dot' : 'erase'));
     on('brushBtn', () => { this.brush = this.brush % 3 + 1; this.updateBrushBtn(); });
+    on('shapeBtn', () => this.cycleShape());
     on('refBtn', () => this.toggleReference());
     this.updateBrushBtn();
+    this.updateShapeBtn();
     document.getElementById('reference')
       .addEventListener('click', () => document.getElementById('reference').classList.add('hidden'), sig);
     document.getElementById('celebrateClose')
@@ -200,19 +268,21 @@ class Editor {
 
     for (let y = y0; y < y1; y++) {
       for (let x = x0; x < x1; x++) {
-        this.drawCell(ctx, this.ox + x * cell, this.oy + y * cell, cell, y * cols + x, showNum);
+        this.drawCell(ctx, this.ox + x * cell, this.oy + y * cell, cell, y * cols + x, showNum, x, y);
       }
     }
   }
 
-  drawCell(ctx, sx, sy, cell, idx, showNum) {
+  drawCell(ctx, sx, sy, cell, idx, showNum, cx, cy) {
     const target = this.p.grid[idx];
     const placed = this.p.filled[idx];
     const pad = cell * 0.06;
     const r = cell - pad * 2;
 
     if (placed >= 0) {
-      ctx.drawImage(this.gemSprites[placed], sx + pad, sy + pad, r, r);
+      // Pick one of the varied shades per cell for a subtle ombre across same-color areas.
+      const variants = this.gemSprites[placed];
+      ctx.drawImage(variants[cellVariant(cx, cy, variants.length)], sx + pad, sy + pad, r, r);
       return;
     }
 
