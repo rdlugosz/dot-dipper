@@ -7,8 +7,7 @@ import { SAMPLES, sampleThumb, sampleSource } from './samples.js';
 import { generateImage, fileToImage, clipboardToImage } from './ai.js';
 import { openEditor } from './editor.js';
 import { exportProject, importProject } from './share.js';
-import { showFinishedArt } from './render.js';
-
+import { showFinishedArt, printChart } from './render.js';
 const homeView = document.getElementById('home');
 const editorView = document.getElementById('editor');
 const modal = document.getElementById('newModal');
@@ -94,6 +93,7 @@ function openCardMenu(p) {
       <button class="btn-primary" data-a="open">Open</button>
       <button class="btn-ghost" data-a="rename">✏️ Rename</button>
       <button class="btn-ghost" data-a="photo">📷 Save photo</button>
+      <button class="btn-ghost" data-a="print">🖨 Print chart</button>
       <button class="btn-ghost" data-a="export">📤 Export / share</button>
       <button class="btn-ghost danger" data-a="delete">🗑 Delete</button>
       <button class="btn-ghost" data-a="cancel">Cancel</button>`;
@@ -101,6 +101,7 @@ function openCardMenu(p) {
     act('open', () => { close(); openProject(p.id); });
     act('rename', () => { close(); renameProject(p.id); });
     act('photo', () => { close(); const full = getProject(p.id); if (full) showFinishedArt(full); });
+    act('print', () => { close(); const full = getProject(p.id); if (full) printChart(full); });
     act('export', () => { close(); exportDialog(p.id); });
     act('delete', () => {
       close();
