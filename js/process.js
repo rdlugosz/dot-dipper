@@ -49,7 +49,7 @@ export function processImage(source, { targetWidth, numColors }) {
   return { cols, rows, palette, grid, thumb: makeThumb(cols, rows, grid, palette) };
 }
 
-function makeThumb(cols, rows, grid, palette) {
+export function makeThumb(cols, rows, grid, palette) {
   const scale = Math.max(1, Math.floor(220 / Math.max(cols, rows)));
   const c = document.createElement('canvas');
   c.width = cols * scale;

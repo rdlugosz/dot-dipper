@@ -54,9 +54,9 @@ body{
 .card .sub{color:var(--muted);font-size:.78rem;margin-top:2px;}
 .card .mini-track{height:5px;border-radius:3px;background:#ffffff1a;margin-top:7px;overflow:hidden;}
 .card .mini-bar{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent-2));}
-.card .del{
+.card .menu-btn{
   position:absolute;top:6px;right:6px;width:30px;height:30px;border:none;border-radius:50%;
-  background:#000a;color:#fff;font-size:1rem;cursor:pointer;backdrop-filter:blur(4px);
+  background:#000a;color:#fff;font-size:1.2rem;line-height:1;cursor:pointer;backdrop-filter:blur(4px);
 }
 .empty-state{grid-column:1/-1;text-align:center;color:var(--muted);margin-top:18vh;padding:0 24px;}
 .empty-state .big{font-size:3rem;margin-bottom:8px;}
@@ -175,6 +175,12 @@ body{
 }
 .row-2{display:flex;gap:10px;}
 .row-2>*{flex:1;}
+.btn-ghost.danger{color:#ff8a8a;border-color:#ff8a8a40;}
+.codebox{
+  width:100%;height:120px;resize:none;margin:6px 0 4px;padding:10px;
+  border-radius:12px;border:1px solid #ffffff20;background:#00000030;color:var(--text);
+  font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.72rem;word-break:break-all;
+}
 .spinner{
   width:34px;height:34px;border-radius:50%;border:4px solid #ffffff30;border-top-color:var(--accent);
   animation:spin 1s linear infinite;
