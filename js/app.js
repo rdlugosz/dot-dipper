@@ -4,7 +4,7 @@
 import { listProjects, getProject, saveProject, deleteProject, newId } from './storage.js';
 import { processImage } from './process.js';
 import { SAMPLES } from './samples.js';
-import { generateImage, fileToImage } from './ai.js';
+import { generateImage, fileToImage, clipboardToImage } from './ai.js';
 import { openEditor } from './editor.js';
 
 const homeView = document.getElementById('home');
@@ -78,10 +78,42 @@ function openNewModal() {
   state.size = 'Medium';
   state.colors = 16;
   modal.classList.remove('hidden');
+  document.addEventListener('paste', onPasteEvent);
   renderSourceStep();
 }
 
-function closeModal() { modal.classList.add('hidden'); modalCard.innerHTML = ''; }
+function closeModal() {
+  modal.classList.add('hidden');
+  modalCard.innerHTML = '';
+  document.removeEventListener('paste', onPasteEvent);
+}
+
+// Desktop convenience: Ctrl/Cmd+V anywhere in the dialog grabs a copied image.
+function onPasteEvent(e) {
+  const items = e.clipboardData && e.clipboardData.items;
+  if (!items) return;
+  for (const it of items) {
+    if (it.type && it.type.startsWith('image/')) {
+      const file = it.getAsFile();
+      if (!file) return;
+      e.preventDefault();
+      fileToImage(file)
+        .then(img => { state.source = img; state.name = 'Pasted image'; renderConfigStep(); })
+        .catch(err => alert(err.message));
+      return;
+    }
+  }
+}
+
+async function pickClipboard() {
+  try {
+    state.source = await clipboardToImage();
+    state.name = 'Pasted image';
+    renderConfigStep();
+  } catch (e) {
+    alert(e.message);
+  }
+}
 
 function renderSourceStep() {
   modalCard.innerHTML = `
@@ -89,11 +121,13 @@ function renderSourceStep() {
     <p class="hint">Where should it come from?</p>
     <div class="source-row">
       <button class="source-btn" data-s="upload"><span class="ico">📷</span>Upload photo</button>
+      <button class="source-btn" data-s="paste"><span class="ico">📋</span>Paste image</button>
       <button class="source-btn" data-s="ai"><span class="ico">✨</span>AI image</button>
       <button class="source-btn" data-s="sample"><span class="ico">🖼️</span>Samples</button>
     </div>
     <button class="btn-ghost" id="cancelNew">Cancel</button>`;
   modalCard.querySelector('[data-s=upload]').onclick = pickUpload;
+  modalCard.querySelector('[data-s=paste]').onclick = pickClipboard;
   modalCard.querySelector('[data-s=ai]').onclick = renderAiStep;
   modalCard.querySelector('[data-s=sample]').onclick = renderSampleStep;
   modalCard.querySelector('#cancelNew').onclick = closeModal;

@@ -10,6 +10,25 @@ const POLLINATIONS_TOKEN = 'sk_3bFrcN8CA522T25Pq5Iqk2RZq99R0ANB'; // free seed-t
 const REFERRER = (typeof location !== 'undefined' && location.hostname) || 'dot-dipper';
 const delay = ms => new Promise(r => setTimeout(r, ms));
 
+// Reads an image off the system clipboard (e.g. after copying a picture from a
+// web page or the photos app), avoiding a save-to-files round trip.
+export async function clipboardToImage() {
+  if (!navigator.clipboard || !navigator.clipboard.read) {
+    throw new Error('Pasting isn\'t supported in this browser — try "Upload photo" instead.');
+  }
+  let items;
+  try {
+    items = await navigator.clipboard.read();
+  } catch {
+    throw new Error('Couldn\'t read the clipboard. Copy an image first, then allow clipboard access.');
+  }
+  for (const item of items) {
+    const type = item.types.find(t => t.startsWith('image/'));
+    if (type) return blobToImage(await item.getType(type));
+  }
+  throw new Error('No image found on the clipboard. Copy a picture first, then tap Paste.');
+}
+
 export function fileToImage(file) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
