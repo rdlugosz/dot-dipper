@@ -6,6 +6,7 @@ import { processImage } from './process.js';
 import { SAMPLES, sampleThumb, sampleSource } from './samples.js';
 import { generateImage, fileToImage, clipboardToImage } from './ai.js';
 import { openEditor } from './editor.js';
+import { exportProject, importProject } from './share.js';
 
 const homeView = document.getElementById('home');
 const editorView = document.getElementById('editor');
@@ -52,19 +53,84 @@ function renderHome() {
     card.className = 'card';
     card.innerHTML = `
       <img class="thumb" src="${p.thumb}" alt="">
-      <button class="del" aria-label="Delete">🗑</button>
+      <button class="menu-btn" aria-label="Options">⋯</button>
       <div class="meta">
         <div class="name">${escapeHtml(p.name)}</div>
         <div class="sub">${p.cols}×${p.rows} · ${pct}% done</div>
         <div class="mini-track"><div class="mini-bar" style="width:${pct}%"></div></div>
       </div>`;
     card.addEventListener('click', () => openProject(p.id));
-    card.querySelector('.del').addEventListener('click', e => {
+    card.querySelector('.menu-btn').addEventListener('click', e => {
       e.stopPropagation();
-      if (confirm(`Delete "${p.name}"? This can't be undone.`)) { deleteProject(p.id); renderHome(); }
+      openCardMenu(p);
     });
     grid.appendChild(card);
   }
+}
+
+/* ---------- gallery item actions (rename / export / delete) ---------- */
+
+// A small standalone modal overlay (separate from the new-project dialog).
+function showModal(build) {
+  const ov = document.createElement('div');
+  ov.className = 'modal';
+  const card = document.createElement('div');
+  card.className = 'modal-card';
+  ov.appendChild(card);
+  const close = () => ov.remove();
+  ov.addEventListener('click', e => { if (e.target === ov) close(); });
+  build(card, close);
+  document.body.appendChild(ov);
+}
+
+function openCardMenu(p) {
+  showModal((card, close) => {
+    card.innerHTML = `
+      <h2>${escapeHtml(p.name)}</h2>
+      <button class="btn-primary" data-a="open">Open</button>
+      <button class="btn-ghost" data-a="rename">✏️ Rename</button>
+      <button class="btn-ghost" data-a="export">📤 Export / share</button>
+      <button class="btn-ghost danger" data-a="delete">🗑 Delete</button>
+      <button class="btn-ghost" data-a="cancel">Cancel</button>`;
+    const act = (a, fn) => { card.querySelector(`[data-a=${a}]`).onclick = fn; };
+    act('open', () => { close(); openProject(p.id); });
+    act('rename', () => { close(); renameProject(p.id); });
+    act('export', () => { close(); exportDialog(p.id); });
+    act('delete', () => {
+      close();
+      if (confirm(`Delete "${p.name}"? This can't be undone.`)) { deleteProject(p.id); renderHome(); }
+    });
+    act('cancel', close);
+  });
+}
+
+function renameProject(id) {
+  const p = getProject(id);
+  if (!p) return;
+  const name = prompt('Rename picture:', p.name);
+  if (name && name.trim()) { p.name = name.trim(); saveProject(p); renderHome(); }
+}
+
+function exportDialog(id) {
+  const p = getProject(id);
+  if (!p) return;
+  const code = exportProject(p);
+  showModal((card, close) => {
+    card.innerHTML = `
+      <h2>Share "${escapeHtml(p.name)}"</h2>
+      <p class="hint">Copy this code, then on another device tap ＋ → "Import a code" and paste it.</p>
+      <textarea id="expCode" class="codebox" readonly></textarea>
+      <button class="btn-primary" id="copyCode">📋 Copy code</button>
+      <button class="btn-ghost" id="closeExp">Close</button>`;
+    const ta = card.querySelector('#expCode');
+    ta.value = code;
+    card.querySelector('#copyCode').onclick = async () => {
+      try { await navigator.clipboard.writeText(code); }
+      catch { ta.select(); document.execCommand('copy'); }
+      card.querySelector('#copyCode').textContent = '✓ Copied!';
+    };
+    card.querySelector('#closeExp').onclick = close;
+  });
 }
 
 /* ---------- new project flow ---------- */
@@ -125,12 +191,36 @@ function renderSourceStep() {
       <button class="source-btn" data-s="ai"><span class="ico">✨</span>AI image</button>
       <button class="source-btn" data-s="sample"><span class="ico">🖼️</span>Samples</button>
     </div>
+    <button class="btn-ghost" id="importBtn">📥 Import a code</button>
     <button class="btn-ghost" id="cancelNew">Cancel</button>`;
   modalCard.querySelector('[data-s=upload]').onclick = pickUpload;
   modalCard.querySelector('[data-s=paste]').onclick = pickClipboard;
   modalCard.querySelector('[data-s=ai]').onclick = renderAiStep;
   modalCard.querySelector('[data-s=sample]').onclick = renderSampleStep;
+  modalCard.querySelector('#importBtn').onclick = renderImportStep;
   modalCard.querySelector('#cancelNew').onclick = closeModal;
+}
+
+function renderImportStep() {
+  modalCard.innerHTML = `
+    <h2>📥 Import a picture</h2>
+    <p class="hint">Paste a code that was shared from another device.</p>
+    <div class="field"><textarea id="impCode" class="codebox" placeholder="DOTDIP1:…"></textarea></div>
+    <div id="impErr" class="error"></div>
+    <button class="btn-primary" id="doImport">Import</button>
+    <button class="btn-ghost" id="backSrc">Back</button>`;
+  modalCard.querySelector('#backSrc').onclick = renderSourceStep;
+  modalCard.querySelector('#doImport').onclick = () => {
+    try {
+      const p = importProject(modalCard.querySelector('#impCode').value);
+      p.id = newId();
+      saveProject(p);
+      closeModal();
+      openProject(p.id);
+    } catch (e) {
+      modalCard.querySelector('#impErr').textContent = e.message;
+    }
+  };
 }
 
 function pickUpload() {
