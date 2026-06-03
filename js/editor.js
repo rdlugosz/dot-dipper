@@ -38,10 +38,12 @@ class Editor {
 
     document.getElementById('editorTitle').textContent = this.p.name;
     this.bindUI();
+    this.renderPalette();   // before measuring: palette height affects canvas size
     this.resize();
-    this.fit();
-    this.renderPalette();
+    this.initialView();
     this.updateProgress();
+    this.draw();
+    this.observeResize();
   }
 
   /* ---------- setup ---------- */
@@ -55,6 +57,9 @@ class Editor {
     on('fitBtn', () => { this.fit(); this.draw(); });
     on('handBtn', () => this.setTool(this.tool === 'hand' ? 'dot' : 'hand'));
     on('eraseBtn', () => this.setTool(this.tool === 'erase' ? 'dot' : 'erase'));
+    on('refBtn', () => this.toggleReference());
+    document.getElementById('reference')
+      .addEventListener('click', () => document.getElementById('reference').classList.add('hidden'), sig);
     document.getElementById('celebrateClose')
       .addEventListener('click', () => document.getElementById('celebrate').classList.add('hidden'), sig);
 
@@ -79,15 +84,55 @@ class Editor {
     this.cssH = r.height;
     this.canvas.width = Math.round(r.width * this.dpr);
     this.canvas.height = Math.round(r.height * this.dpr);
+    this.computeScaleBounds();
   }
 
-  fit() {
+  // Re-measure and redraw whenever the canvas box changes (orientation change,
+  // the mobile address bar showing/hiding, the palette wrapping, etc.).
+  observeResize() {
+    if (typeof ResizeObserver === 'undefined') return;
+    this.ro = new ResizeObserver(() => { this.resize(); this.clampOffset(); this.draw(); });
+    this.ro.observe(this.canvas);
+  }
+
+  computeScaleBounds() {
     const gw = this.p.cols * CELL, gh = this.p.rows * CELL;
+    // minScale shows the whole picture; maxScale allows big, tappable gems.
     this.minScale = Math.min(this.cssW / gw, this.cssH / gh) * 0.95;
-    this.maxScale = Math.max(this.minScale * 6, 80 / CELL);
-    this.scale = this.minScale;
+    this.maxScale = Math.max(this.minScale * 8, 80 / CELL);
+    this.scale = Math.max(this.minScale, Math.min(this.maxScale, this.scale));
+  }
+
+  centerGrid() {
+    const gw = this.p.cols * CELL, gh = this.p.rows * CELL;
     this.ox = (this.cssW - gw * this.scale) / 2;
     this.oy = (this.cssH - gh * this.scale) / 2;
+  }
+
+  // Overview: the entire picture fits on screen.
+  fit() {
+    this.scale = this.minScale;
+    this.centerGrid();
+  }
+
+  // Default when opening: zoomed in to a comfortable, tappable size (~14 cells
+  // across) centered on the picture — never a tiny unusable thumbnail.
+  initialView() {
+    const target = this.cssW / (14 * CELL);
+    this.scale = Math.max(this.minScale, Math.min(this.maxScale, target));
+    this.centerGrid();
+    this.clampOffset();
+  }
+
+  toggleReference() {
+    const ov = document.getElementById('reference');
+    const img = document.getElementById('referenceImg');
+    if (ov.classList.contains('hidden')) {
+      img.src = this.p.thumb;
+      ov.classList.remove('hidden');
+    } else {
+      ov.classList.add('hidden');
+    }
   }
 
   /* ---------- rendering ---------- */
@@ -360,7 +405,9 @@ class Editor {
   destroy() {
     clearTimeout(this.saveTimer);
     this.ac.abort();
+    this.ro?.disconnect();
     this.setTool('dot');
+    document.getElementById('reference').classList.add('hidden');
   }
 }
 
