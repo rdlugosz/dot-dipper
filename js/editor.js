@@ -3,6 +3,7 @@
 // needs it; tapping (or dragging across) those cells places the gems.
 
 import { saveProject, addDotsPlaced } from './storage.js';
+import { showFinishedArt } from './render.js';
 
 const CELL = 20;        // world units per cell
 const MIN_LABEL = 15;   // show numbers only when cells are at least this big (px)
@@ -165,6 +166,11 @@ class Editor {
       .addEventListener('click', () => document.getElementById('reference').classList.add('hidden'), sig);
     document.getElementById('celebrateClose')
       .addEventListener('click', () => document.getElementById('celebrate').classList.add('hidden'), sig);
+    document.getElementById('celebrateSave')
+      .addEventListener('click', () => {
+        document.getElementById('celebrate').classList.add('hidden');
+        showFinishedArt(this.p);
+      }, sig);
 
     const c = this.canvas;
     c.addEventListener('pointerdown', e => this.onDown(e), sig);
@@ -271,6 +277,35 @@ class Editor {
         this.drawCell(ctx, this.ox + x * cell, this.oy + y * cell, cell, y * cols + x, showNum, x, y);
       }
     }
+
+    if (!this.interacting) this.drawSelectionOutline(ctx, x0, y0, x1, y1, cell);
+  }
+
+  // Outline the perimeter of the unfilled regions matching the selected color,
+  // so clusters read as a shape and lone cells get a clear box — easy to spot.
+  drawSelectionOutline(ctx, x0, y0, x1, y1, cell) {
+    const { cols, rows, grid, filled } = this.p;
+    const sel = this.selected;
+    const match = (x, y) =>
+      x >= 0 && y >= 0 && x < cols && y < rows &&
+      grid[y * cols + x] === sel && filled[y * cols + x] < 0;
+    const col = this.p.palette[sel];
+    ctx.strokeStyle = `rgb(${clamp8(col[0] * 0.55)},${clamp8(col[1] * 0.55)},${clamp8(col[2] * 0.55)})`;
+    ctx.lineWidth = Math.max(1.5, cell * 0.1);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        if (!match(x, y)) continue;
+        const sx = this.ox + x * cell, sy = this.oy + y * cell;
+        if (!match(x, y - 1)) { ctx.moveTo(sx, sy); ctx.lineTo(sx + cell, sy); }
+        if (!match(x, y + 1)) { ctx.moveTo(sx, sy + cell); ctx.lineTo(sx + cell, sy + cell); }
+        if (!match(x - 1, y)) { ctx.moveTo(sx, sy); ctx.lineTo(sx, sy + cell); }
+        if (!match(x + 1, y)) { ctx.moveTo(sx + cell, sy); ctx.lineTo(sx + cell, sy + cell); }
+      }
+    }
+    ctx.stroke();
   }
 
   drawCell(ctx, sx, sy, cell, idx, showNum, cx, cy) {
@@ -291,11 +326,9 @@ class Editor {
     roundRect(ctx, sx + pad, sy + pad, r, r, Math.min(5, cell * 0.18));
     if (isSel) {
       // Highlight: a bright cell waiting for the currently selected color.
+      // (Its region perimeter is outlined in a separate pass.)
       ctx.fillStyle = '#ffffff';
       ctx.fill();
-      ctx.lineWidth = Math.max(1, cell * 0.07);
-      ctx.strokeStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
-      ctx.stroke();
     } else {
       // Muted: a dimmed tint of the cell's real color so the picture still
       // reads and you keep your bearings, instead of a black-and-white look.
