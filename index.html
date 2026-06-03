@@ -28,20 +28,25 @@
     <div class="editor-top">
       <button id="backBtn" class="icon-btn" aria-label="Back">‹</button>
       <div class="editor-title" id="editorTitle">Picture</div>
-      <div class="progress-wrap">
-        <div class="progress-track"><div id="progressBar" class="progress-bar"></div></div>
-        <span id="progressPct">0%</span>
-      </div>
+      <span id="progressPct" class="pct">0%</span>
       <div class="tools">
         <button id="undoBtn" class="icon-btn" aria-label="Undo">↶</button>
         <button id="handBtn" class="icon-btn" aria-label="Move / zoom">✋</button>
         <button id="eraseBtn" class="icon-btn" aria-label="Erase">⌫</button>
+        <button id="refBtn" class="icon-btn" aria-label="Show finished picture">👁</button>
         <button id="fitBtn" class="icon-btn" aria-label="Fit to screen">⤢</button>
       </div>
     </div>
+    <div class="progress-track"><div id="progressBar" class="progress-bar"></div></div>
     <canvas id="board"></canvas>
     <div id="palette" class="palette"></div>
   </section>
+
+  <!-- ===== Reference (finished-picture peek) ===== -->
+  <div id="reference" class="reference hidden">
+    <img id="referenceImg" alt="What the finished picture looks like">
+    <div class="reference-cap">What it will look like — tap to close</div>
+  </div>
 
   <!-- ===== New project modal ===== -->
   <div id="newModal" class="modal hidden">
