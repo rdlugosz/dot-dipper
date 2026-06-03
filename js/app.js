@@ -387,12 +387,59 @@ function escapeHtml(s) {
 }
 function escapeAttr(s) { return escapeHtml(s).replace(/"/g, '&quot;'); }
 
+/* ---------- update checks (for installed PWAs that can't easily refresh) ---------- */
+
+// version.json is written at deploy time with the build's git SHA. We remember
+// the version we loaded with, then re-check on focus and on an interval; if the
+// deployed version differs, we offer a gentle "Refresh" banner.
+let loadedVersion = null;
+
+async function fetchVersion() {
+  try {
+    const r = await fetch('version.json', { cache: 'no-store' });
+    if (!r.ok) return null;
+    return (await r.json()).version || null;
+  } catch { return null; }
+}
+
+async function checkForUpdate() {
+  const v = await fetchVersion();
+  if (v && loadedVersion && v !== loadedVersion) showUpdateBanner();
+}
+
+function showUpdateBanner() {
+  if (document.getElementById('updateBanner')) return;
+  const el = document.createElement('div');
+  el.id = 'updateBanner';
+  el.className = 'update-banner';
+  el.innerHTML = `<span>✨ Update ready</span>
+    <button id="updateRefresh">Refresh</button>
+    <button id="updateDismiss" aria-label="Dismiss">✕</button>`;
+  el.querySelector('#updateRefresh').onclick = async () => {
+    try { editor?.flushSave?.(); } catch {}
+    try { (await navigator.serviceWorker?.getRegistration())?.update(); } catch {}
+    location.reload();
+  };
+  el.querySelector('#updateDismiss').onclick = () => el.remove();
+  document.body.appendChild(el);
+}
+
+async function initUpdateChecks() {
+  loadedVersion = await fetchVersion();
+  if (!loadedVersion) return; // no version stamp (e.g. local dev) → nothing to compare
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') checkForUpdate();
+  });
+  setInterval(checkForUpdate, 15 * 60 * 1000);
+}
+
 /* ---------- boot ---------- */
 
 document.getElementById('newBtn').addEventListener('click', openNewModal);
 modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
 
 renderHome();
+initUpdateChecks();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));

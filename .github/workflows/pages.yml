@@ -23,6 +23,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      - name: Stamp build version
+        run: echo "{\"version\":\"$GITHUB_SHA\"}" > version.json
       - uses: actions/upload-pages-artifact@v3
         with:
           path: .
