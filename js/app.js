@@ -4,7 +4,7 @@
 import { listProjects, getProject, saveProject, deleteProject, newId } from './storage.js';
 import { processImage } from './process.js';
 import { SAMPLES } from './samples.js';
-import { generateImage, fileToImage } from './ai.js';
+import { generateImage, fileToImage, clipboardToImage } from './ai.js';
 import { openEditor } from './editor.js';
 
 const homeView = document.getElementById('home');
@@ -78,10 +78,42 @@ function openNewModal() {
   state.size = 'Medium';
   state.colors = 16;
   modal.classList.remove('hidden');
+  document.addEventListener('paste', onPasteEvent);
   renderSourceStep();
 }
 
-function closeModal() { modal.classList.add('hidden'); modalCard.innerHTML = ''; }
+function closeModal() {
+  modal.classList.add('hidden');
+  modalCard.innerHTML = '';
+  document.removeEventListener('paste', onPasteEvent);
+}
+
+// Desktop convenience: Ctrl/Cmd+V anywhere in the dialog grabs a copied image.
+function onPasteEvent(e) {
+  const items = e.clipboardData && e.clipboardData.items;
+  if (!items) return;
+  for (const it of items) {
+    if (it.type && it.type.startsWith('image/')) {
+      const file = it.getAsFile();
+      if (!file) return;
+      e.preventDefault();
+      fileToImage(file)
+        .then(img => { state.source = img; state.name = 'Pasted image'; renderConfigStep(); })
+        .catch(err => alert(err.message));
+      return;
+    }
+  }
+}
+
+async function pickClipboard() {
+  try {
+    state.source = await clipboardToImage();
+    state.name = 'Pasted image';
+    renderConfigStep();
+  } catch (e) {
+    alert(e.message);
+  }
+}
 
 function renderSourceStep() {
   modalCard.innerHTML = `
@@ -89,11 +121,13 @@ function renderSourceStep() {
     <p class="hint">Where should it come from?</p>
     <div class="source-row">
       <button class="source-btn" data-s="upload"><span class="ico">📷</span>Upload photo</button>
+      <button class="source-btn" data-s="paste"><span class="ico">📋</span>Paste image</button>
       <button class="source-btn" data-s="ai"><span class="ico">✨</span>AI image</button>
       <button class="source-btn" data-s="sample"><span class="ico">🖼️</span>Samples</button>
     </div>
     <button class="btn-ghost" id="cancelNew">Cancel</button>`;
   modalCard.querySelector('[data-s=upload]').onclick = pickUpload;
+  modalCard.querySelector('[data-s=paste]').onclick = pickClipboard;
   modalCard.querySelector('[data-s=ai]').onclick = renderAiStep;
   modalCard.querySelector('[data-s=sample]').onclick = renderSampleStep;
   modalCard.querySelector('#cancelNew').onclick = closeModal;
@@ -126,7 +160,9 @@ function renderAiStep() {
     <div id="aiStatus"></div>
     <button class="btn-ghost" id="backSrc">Back</button>
     <p class="note">Images come from a free public AI service (Pollinations.ai) with its
-    safe filter on. It's not a closed garden, so a grown-up should glance at results.</p>`;
+    safe filter on. It's rate-limited (about one picture every 15s) and may add a small
+    watermark, so it can be slow or busy — just try again, or use a photo / sample.
+    It's not a closed garden, so a grown-up should glance at results.</p>`;
   const prompt = modalCard.querySelector('#aiPrompt');
   modalCard.querySelector('#backSrc').onclick = renderSourceStep;
   modalCard.querySelector('#genBtn').onclick = async () => {
@@ -134,15 +170,17 @@ function renderAiStep() {
     if (!text) { prompt.focus(); return; }
     const status = modalCard.querySelector('#aiStatus');
     status.innerHTML = `<div class="field" style="display:flex;align-items:center;gap:12px">
-      <div class="spinner"></div><span>Generating… this can take 10–20s.</span></div>`;
+      <div class="spinner"></div><span>Generating… this can take 10–30s.</span></div>`;
     modalCard.querySelector('#genBtn').disabled = true;
     try {
       state.source = await generateImage(text);
       state.name = text.slice(0, 28);
       renderConfigStep();
     } catch (e) {
-      status.innerHTML = `<div class="error">Couldn't generate that image. Check your
-        connection and try again, or use a photo / sample.</div>`;
+      const busy = e && e.code === 'rate';
+      status.innerHTML = `<div class="error">${busy
+        ? 'The free AI service is busy (it only allows one picture every several seconds). Wait a few seconds and tap Generate again — or use a photo / sample.'
+        : "Couldn't generate that image. Check the connection and try again, or use a photo / sample."}</div>`;
       modalCard.querySelector('#genBtn').disabled = false;
     }
   };

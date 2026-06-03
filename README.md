@@ -13,7 +13,10 @@ browser — no backend, no accounts, no tracking. Built to be played on a phone.
 - **Three ways to start a picture:**
   1. **📷 Upload a photo** from the device.
   2. **✨ AI image** — type a description and get a generated picture
-     ([Pollinations.ai](https://pollinations.ai), keyless & free, safe filter on).
+     ([Pollinations.ai](https://pollinations.ai), keyless, safe filter on). The free
+     anonymous tier is **rate-limited** (~1 image every 15s) and may watermark, so it
+     can be slow or busy; the app retries and tells you to wait. For more reliable,
+     watermark-free results, paste a free token (see below).
   3. **🖼️ Samples** — built-in pictures that work fully offline.
 - Any image is automatically **posterized** (resized + color-reduced via
   median-cut quantization) into a dot grid. You choose the size and number of colors.
@@ -58,6 +61,17 @@ Plain HTML/CSS/vanilla-JS ES modules — no framework, no build step.
 | `js/ai.js` | Photo upload + keyless AI generation |
 | `js/storage.js` | Project persistence (localStorage) |
 | `sw.js` / `manifest.json` | Offline support + installable PWA |
+
+## Making AI generation more reliable (optional, free)
+
+Pollinations' anonymous tier is throttled and occasionally returns a
+rate-limit/payment wall. To get faster, watermark-free generation for free:
+
+1. Register an app at **https://auth.pollinations.ai** (GitHub login) to get a token.
+2. Paste it into `POLLINATIONS_TOKEN` at the top of `js/ai.js`.
+
+The token sits in client code (it's a free-tier token, so the risk is low). If you'd
+rather not bother, the photo-upload and sample options always work with no setup.
 
 ## A note for grown-ups
 
