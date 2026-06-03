@@ -25,6 +25,7 @@ class Editor {
     this.ox = 0;
     this.oy = 0;
     this.tool = 'dot';            // 'dot' | 'hand' | 'erase'
+    this.brush = 1;               // brush width in cells (1, 2, or 3 → 1/4/9 dots)
     this.history = [];
     this.pointers = new Map();
     this.pinch = null;
@@ -89,7 +90,9 @@ class Editor {
     on('fitBtn', () => { this.fit(); this.draw(); });
     on('handBtn', () => this.setTool(this.tool === 'hand' ? 'dot' : 'hand'));
     on('eraseBtn', () => this.setTool(this.tool === 'erase' ? 'dot' : 'erase'));
+    on('brushBtn', () => { this.brush = this.brush % 3 + 1; this.updateBrushBtn(); });
     on('refBtn', () => this.toggleReference());
+    this.updateBrushBtn();
     document.getElementById('reference')
       .addEventListener('click', () => document.getElementById('reference').classList.add('hidden'), sig);
     document.getElementById('celebrateClose')
@@ -108,6 +111,11 @@ class Editor {
     this.tool = t;
     document.getElementById('handBtn').classList.toggle('active', t === 'hand');
     document.getElementById('eraseBtn').classList.toggle('active', t === 'erase');
+  }
+
+  updateBrushBtn() {
+    document.getElementById('brushBadge').textContent = this.brush;
+    document.getElementById('brushBtn').classList.toggle('active', this.brush > 1);
   }
 
   resize() {
@@ -319,40 +327,54 @@ class Editor {
 
   /* ---------- placement ---------- */
 
-  cellAt(clientX, clientY) {
+  cellXYAt(clientX, clientY) {
     const r = this.canvas.getBoundingClientRect();
     const cell = CELL * this.scale;
     const x = Math.floor((clientX - r.left - this.ox) / cell);
     const y = Math.floor((clientY - r.top - this.oy) / cell);
-    if (x < 0 || y < 0 || x >= this.p.cols || y >= this.p.rows) return -1;
-    return y * this.p.cols + x;
+    if (x < 0 || y < 0 || x >= this.p.cols || y >= this.p.rows) return null;
+    return { x, y };
   }
 
   paintAt(clientX, clientY) {
-    const idx = this.cellAt(clientX, clientY);
-    if (idx < 0 || idx === this.lastPaintIdx) return;
-    this.lastPaintIdx = idx;
+    const c = this.cellXYAt(clientX, clientY);
+    if (!c) return;
+    const center = c.y * this.p.cols + c.x;
+    if (center === this.lastPaintIdx) return;   // still on the same cell, skip
+    this.lastPaintIdx = center;
 
-    if (this.tool === 'erase') {
-      if (this.p.filled[idx] >= 0) {
-        this.history.push({ idx, prev: this.p.filled[idx] });
-        this.p.filled[idx] = -1;
-        this.afterChange();
+    // Brush footprint: an n×n block of cells centered on the touched cell, so a
+    // single tap/wipe can fill several dots at once.
+    const lo = -Math.floor((this.brush - 1) / 2);
+    const hi = Math.ceil((this.brush - 1) / 2);
+    const erase = this.tool === 'erase';
+    const changes = [];
+    for (let dy = lo; dy <= hi; dy++) {
+      const y = c.y + dy;
+      if (y < 0 || y >= this.p.rows) continue;
+      for (let dx = lo; dx <= hi; dx++) {
+        const x = c.x + dx;
+        if (x < 0 || x >= this.p.cols) continue;
+        const idx = y * this.p.cols + x;
+        if (erase) {
+          if (this.p.filled[idx] >= 0) { changes.push({ idx, prev: this.p.filled[idx] }); this.p.filled[idx] = -1; }
+        } else if (this.p.grid[idx] === this.selected && this.p.filled[idx] < 0) {
+          // Only fill cells that match the selected color — no mistakes.
+          changes.push({ idx, prev: -1 });
+          this.p.filled[idx] = this.selected;
+        }
       }
-      return;
     }
-    // Dot tool: only place on cells that match the selected color (no mistakes).
-    if (this.p.grid[idx] === this.selected && this.p.filled[idx] < 0) {
-      this.history.push({ idx, prev: -1 });
-      this.p.filled[idx] = this.selected;
+    if (changes.length) {
+      this.history.push(changes);   // one undo step per brush dab
       this.afterChange();
     }
   }
 
   undo() {
-    const last = this.history.pop();
-    if (!last) return;
-    this.p.filled[last.idx] = last.prev;
+    const group = this.history.pop();
+    if (!group) return;
+    for (const c of group) this.p.filled[c.idx] = c.prev;
     this.afterChange();
   }
 
