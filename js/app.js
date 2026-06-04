@@ -6,7 +6,7 @@ import { processImage } from './process.js';
 import { SAMPLES, sampleThumb, sampleSource } from './samples.js';
 import { generateImage, fileToImage, clipboardToImage } from './ai.js';
 import { openEditor } from './editor.js';
-import { exportProject, importProject } from './share.js';
+import { exportProject, decodeShared, encodePatternPayload } from './share.js';
 import { showFinishedArt, printChart } from './render.js';
 const homeView = document.getElementById('home');
 const editorView = document.getElementById('editor');
@@ -142,40 +142,38 @@ function exportDialog(id) {
   });
 }
 
-// Share a fresh (un-filled) copy of a pattern for someone else to do.
-function sharePattern(id) {
+// Share a fresh (un-filled) copy of a pattern as a clickable link that
+// auto-imports when opened. The pattern rides in the URL #hash (never sent to a
+// server) and is gzip-compressed to keep the link short.
+async function sharePattern(id) {
   const p = getProject(id);
   if (!p) return;
-  const blank = { ...p, filled: new Array(p.grid.length).fill(-1) };
-  const code = exportProject(blank);
-  shareTextCode({
-    title: `Dot Dipper pattern: ${p.name}`,
-    intro: `Here's a Dot Dipper pattern for you — "${p.name}". In Dot Dipper, tap ＋ → "Import a code" and paste this:`,
-    code,
-  });
-}
-
-// Shares a code via the native share sheet, falling back to a copyable dialog.
-async function shareTextCode({ title, intro, code }) {
+  const url = location.origin + location.pathname + '#pat=' + (await encodePatternPayload(p));
+  const data = {
+    title: `Dot Dipper: ${p.name}`,
+    text: `Here's a Dot Dipper pattern for you — "${p.name}". Tap to open it:`,
+    url,
+  };
   if (navigator.share) {
-    try { await navigator.share({ title, text: `${intro}\n\n${code}` }); return; }
-    catch { return; }   // user cancelled
+    try { await navigator.share(data); } catch { /* cancelled */ }
+    return;
   }
+  // Fallback: a copyable link.
   showModal((card, close) => {
     card.innerHTML = `
-      <h2>${escapeHtml(title)}</h2>
-      <p class="hint">${escapeHtml(intro)}</p>
+      <h2>🧩 Share "${escapeHtml(p.name)}"</h2>
+      <p class="hint">Copy this link and send it. Opening it adds the pattern automatically.</p>
       <textarea class="codebox" readonly></textarea>
-      <button class="btn-primary" id="copyShare">📋 Copy code</button>
-      <button class="btn-ghost" id="closeShare">Close</button>`;
+      <button class="btn-primary" id="copyLink">🔗 Copy link</button>
+      <button class="btn-ghost" id="closeLink">Close</button>`;
     const ta = card.querySelector('textarea');
-    ta.value = code;
-    card.querySelector('#copyShare').onclick = async () => {
-      try { await navigator.clipboard.writeText(code); }
+    ta.value = url;
+    card.querySelector('#copyLink').onclick = async () => {
+      try { await navigator.clipboard.writeText(url); }
       catch { ta.select(); document.execCommand('copy'); }
-      card.querySelector('#copyShare').textContent = '✓ Copied!';
+      card.querySelector('#copyLink').textContent = '✓ Copied!';
     };
-    card.querySelector('#closeShare').onclick = close;
+    card.querySelector('#closeLink').onclick = close;
   });
 }
 
@@ -250,15 +248,15 @@ function renderSourceStep() {
 function renderImportStep() {
   modalCard.innerHTML = `
     <h2>📥 Import a picture</h2>
-    <p class="hint">Paste a code that was shared from another device.</p>
-    <div class="field"><textarea id="impCode" class="codebox" placeholder="DOTDIP1:…"></textarea></div>
+    <p class="hint">Paste a shared <b>link</b> or code. (Tapping a shared link opens it automatically.)</p>
+    <div class="field"><textarea id="impCode" class="codebox" placeholder="https://…#pat=…  or  DOTDIP1:…"></textarea></div>
     <div id="impErr" class="error"></div>
     <button class="btn-primary" id="doImport">Import</button>
     <button class="btn-ghost" id="backSrc">Back</button>`;
   modalCard.querySelector('#backSrc').onclick = renderSourceStep;
-  modalCard.querySelector('#doImport').onclick = () => {
+  modalCard.querySelector('#doImport').onclick = async () => {
     try {
-      const p = importProject(modalCard.querySelector('#impCode').value);
+      const p = await decodeShared(modalCard.querySelector('#impCode').value);
       p.id = newId();
       saveProject(p);
       closeModal();
@@ -557,6 +555,22 @@ async function shareApp() {
   }
 }
 
+// If opened via a shared pattern link (#pat=…), import it and open the editor.
+async function handleSharedLink() {
+  if (!/[#&]pat=/.test(location.hash)) return;
+  try {
+    const p = await decodeShared(location.hash);
+    p.id = newId();
+    saveProject(p);
+    history.replaceState(null, '', location.pathname + location.search); // consume the link
+    renderHome();
+    openProject(p.id);
+  } catch {
+    history.replaceState(null, '', location.pathname + location.search);
+    alert("Sorry — that shared pattern link couldn't be opened.");
+  }
+}
+
 /* ---------- boot ---------- */
 
 document.getElementById('newBtn').addEventListener('click', openNewModal);
@@ -564,6 +578,7 @@ document.getElementById('shareAppBtn').addEventListener('click', shareApp);
 modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
 
 renderHome();
+handleSharedLink();
 setupInstall();
 initUpdateChecks();
 
