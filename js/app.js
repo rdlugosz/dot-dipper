@@ -94,7 +94,8 @@ function openCardMenu(p) {
       <button class="btn-ghost" data-a="rename">✏️ Rename</button>
       <button class="btn-ghost" data-a="photo">📷 Save photo</button>
       <button class="btn-ghost" data-a="print">🖨 Print chart</button>
-      <button class="btn-ghost" data-a="export">📤 Export / share</button>
+      <button class="btn-ghost" data-a="share">🧩 Share pattern</button>
+      <button class="btn-ghost" data-a="export">📤 Export progress</button>
       <button class="btn-ghost danger" data-a="delete">🗑 Delete</button>
       <button class="btn-ghost" data-a="cancel">Cancel</button>`;
     const act = (a, fn) => { card.querySelector(`[data-a=${a}]`).onclick = fn; };
@@ -102,6 +103,7 @@ function openCardMenu(p) {
     act('rename', () => { close(); renameProject(p.id); });
     act('photo', () => { close(); const full = getProject(p.id); if (full) showFinishedArt(full); });
     act('print', () => { close(); const full = getProject(p.id); if (full) printChart(full); });
+    act('share', () => { close(); sharePattern(p.id); });
     act('export', () => { close(); exportDialog(p.id); });
     act('delete', () => {
       close();
@@ -124,8 +126,8 @@ function exportDialog(id) {
   const code = exportProject(p);
   showModal((card, close) => {
     card.innerHTML = `
-      <h2>Share "${escapeHtml(p.name)}"</h2>
-      <p class="hint">Copy this code, then on another device tap ＋ → "Import a code" and paste it.</p>
+      <h2>Export "${escapeHtml(p.name)}"</h2>
+      <p class="hint">Saves your current progress. Copy this code, then on another device tap ＋ → "Import a code" and paste it.</p>
       <textarea id="expCode" class="codebox" readonly></textarea>
       <button class="btn-primary" id="copyCode">📋 Copy code</button>
       <button class="btn-ghost" id="closeExp">Close</button>`;
@@ -137,6 +139,43 @@ function exportDialog(id) {
       card.querySelector('#copyCode').textContent = '✓ Copied!';
     };
     card.querySelector('#closeExp').onclick = close;
+  });
+}
+
+// Share a fresh (un-filled) copy of a pattern for someone else to do.
+function sharePattern(id) {
+  const p = getProject(id);
+  if (!p) return;
+  const blank = { ...p, filled: new Array(p.grid.length).fill(-1) };
+  const code = exportProject(blank);
+  shareTextCode({
+    title: `Dot Dipper pattern: ${p.name}`,
+    intro: `Here's a Dot Dipper pattern for you — "${p.name}". In Dot Dipper, tap ＋ → "Import a code" and paste this:`,
+    code,
+  });
+}
+
+// Shares a code via the native share sheet, falling back to a copyable dialog.
+async function shareTextCode({ title, intro, code }) {
+  if (navigator.share) {
+    try { await navigator.share({ title, text: `${intro}\n\n${code}` }); return; }
+    catch { return; }   // user cancelled
+  }
+  showModal((card, close) => {
+    card.innerHTML = `
+      <h2>${escapeHtml(title)}</h2>
+      <p class="hint">${escapeHtml(intro)}</p>
+      <textarea class="codebox" readonly></textarea>
+      <button class="btn-primary" id="copyShare">📋 Copy code</button>
+      <button class="btn-ghost" id="closeShare">Close</button>`;
+    const ta = card.querySelector('textarea');
+    ta.value = code;
+    card.querySelector('#copyShare').onclick = async () => {
+      try { await navigator.clipboard.writeText(code); }
+      catch { ta.select(); document.execCommand('copy'); }
+      card.querySelector('#copyShare').textContent = '✓ Copied!';
+    };
+    card.querySelector('#closeShare').onclick = close;
   });
 }
 
@@ -494,9 +533,34 @@ function showInstallHelp() {
   });
 }
 
+/* ---------- share the app ---------- */
+
+async function shareApp() {
+  const url = location.origin + location.pathname;
+  const data = { title: 'Dot Dipper', text: 'Play Dot Dipper — a calm, ad-free diamond-dot painting game!', url };
+  if (navigator.share) {
+    try { await navigator.share(data); return; } catch { return; }
+  }
+  const btn = document.getElementById('shareAppBtn');
+  try {
+    await navigator.clipboard.writeText(url);
+    if (btn) { const t = btn.textContent; btn.textContent = '✓ Link copied!'; setTimeout(() => (btn.textContent = t), 1800); }
+  } catch {
+    showModal((card, close) => {
+      card.innerHTML = `<h2>🔗 Share Dot Dipper</h2>
+        <p class="hint">Copy this link and send it to a friend:</p>
+        <textarea class="codebox" readonly style="height:auto;min-height:54px"></textarea>
+        <button class="btn-primary" id="closeShareApp">Close</button>`;
+      card.querySelector('textarea').value = url;
+      card.querySelector('#closeShareApp').onclick = close;
+    });
+  }
+}
+
 /* ---------- boot ---------- */
 
 document.getElementById('newBtn').addEventListener('click', openNewModal);
+document.getElementById('shareAppBtn').addEventListener('click', shareApp);
 modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
 
 renderHome();
