@@ -1,7 +1,7 @@
 // Built-in sample pictures. Most are drawn on a canvas at runtime from flat
 // shapes/gradients; some are bundled photos (data URLs). All work fully offline.
 
-import { DOG } from './sample-images.js';
+import { DOG, EYE } from './sample-images.js';
 
 function make(size, draw) {
   const c = document.createElement('canvas');
@@ -13,7 +13,8 @@ function make(size, draw) {
 function bg(ctx, s, color) { ctx.fillStyle = color; ctx.fillRect(0, 0, s, s); }
 
 export const SAMPLES = [
-  { name: 'Puppy', src: DOG },   // bundled photo sample
+  { name: 'Puppy', src: DOG },   // bundled photo samples
+  { name: 'Eye', src: EYE },
   {
     name: 'Rainbow',
     build: s => make(s, (ctx, S) => {
