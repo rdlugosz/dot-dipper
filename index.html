@@ -9,7 +9,7 @@
   <title>Dot Dipper</title>
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" href="icon.svg" />
-  <link rel="apple-touch-icon" href="icon.svg" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
@@ -18,7 +18,10 @@
     <header class="home-header">
       <h1><span class="logo-dot"></span>Dot Dipper</h1>
       <p class="tagline">Tap the gems to bring the picture to life ✨</p>
-      <div id="dotStat" class="dot-stat"></div>
+      <div class="header-row">
+        <div id="dotStat" class="dot-stat"></div>
+        <button id="installBtn" class="install-btn hidden">📲 Install app</button>
+      </div>
     </header>
     <div id="projectList" class="project-grid"></div>
     <button id="newBtn" class="fab" aria-label="New picture">＋</button>
