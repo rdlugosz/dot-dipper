@@ -571,16 +571,43 @@ async function handleSharedLink() {
   }
 }
 
+/* ---------- welcome / how-to ---------- */
+
+function openWelcome() {
+  showModal((card, close) => {
+    card.innerHTML = `
+      <h2>Welcome to Dot Dipper 💎</h2>
+      <p class="hint">Turn any picture into a calm, ad-free diamond-dot painting.</p>
+      <div class="help-list">
+        <p><b>1. Start a picture</b> — tap <b>＋</b> and choose a photo, a sample, a pasted image, or an AI one (or import a shared link).</p>
+        <p><b>2. Pick a color</b> — tap a color in the bottom bar. The squares that need it light up.</p>
+        <p><b>3. Place the gems</b> — tap or wipe across those squares. Use 🖌 for clusters, ⌫ to erase, ↶ to undo.</p>
+        <p><b>4. Get around</b> — pinch or ✋ to move, ⤢ to fit the whole picture, 👁 to peek the finished art.</p>
+        <p><b>5. Make it yours</b> — ⚙ Options has dot shapes and a gentle pulse helper.</p>
+        <p><b>6. Show it off</b> — 📷 save your art, 🖨 print a chart, or 🧩 share a pattern with a friend.</p>
+      </div>
+      <button class="btn-primary" id="welcomeOk">Let's go!</button>`;
+    card.querySelector('#welcomeOk').onclick = close;
+  });
+}
+
 /* ---------- boot ---------- */
 
 document.getElementById('newBtn').addEventListener('click', openNewModal);
 document.getElementById('shareAppBtn').addEventListener('click', shareApp);
+document.getElementById('helpBtn').addEventListener('click', openWelcome);
 modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
 
 renderHome();
 handleSharedLink();
 setupInstall();
 initUpdateChecks();
+
+// Show the welcome the first time (unless we're opening a shared pattern link).
+if (!/[#&]pat=/.test(location.hash) && !localStorage.getItem('dotdipper.welcomed')) {
+  localStorage.setItem('dotdipper.welcomed', '1');
+  openWelcome();
+}
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
