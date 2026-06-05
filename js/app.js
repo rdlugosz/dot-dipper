@@ -36,39 +36,58 @@ function openProject(id) {
 
 function renderHome() {
   const list = listProjects();
-  const grid = document.getElementById('projectList');
-  grid.innerHTML = '';
+  const container = document.getElementById('projectList');
+  container.innerHTML = '';
 
   const dots = getDotsPlaced();
   document.getElementById('dotStat').textContent = `💎 ${dots.toLocaleString()} dots placed`;
 
   if (list.length === 0) {
-    grid.innerHTML = `<div class="empty-state">
+    container.innerHTML = `<div class="empty-state">
       <div class="big">🎨</div>
       <p>No pictures yet.<br>Tap the <b>＋</b> button to start your first one!</p>
     </div>`;
     return;
   }
 
-  for (const p of list) {
-    const pct = Math.round((p.placed / p.total) * 100);
-    const card = document.createElement('div');
-    card.className = 'card';
-    card.innerHTML = `
-      <img class="thumb" src="${p.thumb}" alt="">
-      <button class="menu-btn" aria-label="Options">⋯</button>
-      <div class="meta">
-        <div class="name">${escapeHtml(p.name)}</div>
-        <div class="sub">${p.cols}×${p.rows} · ${pct}% done</div>
-        <div class="mini-track"><div class="mini-bar" style="width:${pct}%"></div></div>
-      </div>`;
-    card.addEventListener('click', () => openProject(p.id));
-    card.querySelector('.menu-btn').addEventListener('click', e => {
-      e.stopPropagation();
-      openCardMenu(p);
-    });
-    grid.appendChild(card);
-  }
+  const inProgress = list.filter(p => p.placed < p.total);
+  const completed = list.filter(p => p.placed >= p.total);
+  renderSection(container, 'In progress', inProgress);
+  renderSection(container, '✨ Gallery', completed);
+}
+
+function renderSection(container, title, items) {
+  if (!items.length) return;
+  const section = document.createElement('div');
+  section.className = 'section';
+  const head = document.createElement('div');
+  head.className = 'section-head';
+  head.innerHTML = `<span>${title}</span><span class="count">${items.length}</span>`;
+  const grid = document.createElement('div');
+  grid.className = 'project-grid';
+  for (const p of items) grid.appendChild(makeCard(p));
+  section.append(head, grid);
+  container.appendChild(section);
+}
+
+function makeCard(p) {
+  const pct = Math.round((p.placed / p.total) * 100);
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `
+    <img class="thumb" src="${p.thumb}" alt="">
+    <button class="menu-btn" aria-label="Options">⋯</button>
+    <div class="meta">
+      <div class="name">${escapeHtml(p.name)}</div>
+      <div class="sub">${p.cols}×${p.rows} · ${pct === 100 ? 'done ✓' : pct + '% done'}</div>
+      <div class="mini-track"><div class="mini-bar" style="width:${pct}%"></div></div>
+    </div>`;
+  card.addEventListener('click', () => openProject(p.id));
+  card.querySelector('.menu-btn').addEventListener('click', e => {
+    e.stopPropagation();
+    openCardMenu(p);
+  });
+  return card;
 }
 
 /* ---------- gallery item actions (rename / export / delete) ---------- */
